@@ -7,7 +7,8 @@ import time
 
 from masterclaw_core.middleware import (
     RequestLoggingMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware,
-    require_api_key
+    require_api_key, sanitize_input, safe_compare_keys, SQL_INJECTION_PATTERN,
+    XSS_PATTERN, PATH_TRAVERSAL_PATTERN
 )
 
 
@@ -232,3 +233,199 @@ class TestMiddlewareChaining:
         assert "X-RateLimit-Limit" in response.headers
         # Check timing headers
         assert "X-Response-Time" in response.headers
+
+
+# =============================================================================
+# NEW SECURITY TESTS
+# =============================================================================
+
+class TestRequestIDTracking:
+    """Test request ID generation and tracking"""
+    
+    def test_request_id_header_added(self):
+        """Test that request ID is added to response headers"""
+        app = FastAPI()
+        app.add_middleware(RequestLoggingMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        assert "X-Request-ID" in response.headers
+        # Verify format (8 character hex)
+        request_id = response.headers["X-Request-ID"]
+        assert len(request_id) == 8
+        assert all(c in "0123456789abcdef" for c in request_id)
+        
+    def test_request_id_preserved_from_header(self):
+        """Test that provided request ID is preserved"""
+        app = FastAPI()
+        app.add_middleware(RequestLoggingMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        custom_id = "abc12345"
+        response = client.get("/", headers={"X-Request-ID": custom_id})
+        
+        assert response.headers["X-Request-ID"] == custom_id
+
+
+class TestInputSanitization:
+    """Test input sanitization utilities"""
+    
+    def test_sanitize_valid_input(self):
+        """Test that valid input passes through unchanged"""
+        valid_inputs = [
+            "Hello world",
+            "Python programming tips",
+            "test@example.com",
+            "https://example.com/path",
+            "Normal text with numbers 123",
+        ]
+        for inp in valid_inputs:
+            result = sanitize_input(inp)
+            assert result == inp
+    
+    def test_sanitize_sql_injection(self):
+        """Test that SQL injection patterns are rejected"""
+        malicious_inputs = [
+            "'; DROP TABLE users; --",
+            "1' OR '1'='1",
+            "1 AND 1=1",
+            "SELECT * FROM passwords",
+            "UNION SELECT username, password FROM admin",
+        ]
+        for inp in malicious_inputs:
+            with pytest.raises(ValueError, match="Potentially dangerous input"):
+                sanitize_input(inp)
+    
+    def test_sanitize_xss_patterns(self):
+        """Test that XSS patterns are rejected"""
+        malicious_inputs = [
+            "<script>alert('xss')</script>",
+            "javascript:alert('xss')",
+            "<img onerror=alert('xss')>",
+            "<iframe src='evil.com'>",
+        ]
+        for inp in malicious_inputs:
+            with pytest.raises(ValueError, match="Potentially dangerous input"):
+                sanitize_input(inp)
+    
+    def test_sanitize_path_traversal(self):
+        """Test that path traversal patterns are rejected"""
+        malicious_inputs = [
+            "../../../etc/passwd",
+            "..\\..\\windows\\system32\\config\\sam",
+            "%2e%2e%2fetc%2fpasswd",
+        ]
+        for inp in malicious_inputs:
+            with pytest.raises(ValueError, match="Potentially dangerous input"):
+                sanitize_input(inp)
+    
+    def test_sanitize_max_length(self):
+        """Test that max length is enforced"""
+        long_input = "a" * 10001
+        with pytest.raises(ValueError, match="exceeds maximum length"):
+            sanitize_input(long_input, max_length=10000)
+        
+        # Should work at exactly max length
+        exact_input = "a" * 10000
+        result = sanitize_input(exact_input, max_length=10000)
+        assert result == exact_input
+    
+    def test_sanitize_non_string_input(self):
+        """Test that non-string inputs pass through unchanged"""
+        assert sanitize_input(123) == 123
+        assert sanitize_input(None) is None
+        assert sanitize_input([1, 2, 3]) == [1, 2, 3]
+
+
+class TestSafeKeyComparison:
+    """Test timing-attack-safe key comparison"""
+    
+    def test_safe_compare_matching_keys(self):
+        """Test that matching keys return True"""
+        assert safe_compare_keys("secret", "secret") is True
+        assert safe_compare_keys("a" * 100, "a" * 100) is True
+    
+    def test_safe_compare_different_keys(self):
+        """Test that different keys return False"""
+        assert safe_compare_keys("secret1", "secret2") is False
+        assert safe_compare_keys("short", "muchlongerstring") is False
+        assert safe_compare_keys("", "something") is False
+    
+    def test_safe_compare_none_keys(self):
+        """Test handling of None keys"""
+        assert safe_compare_keys(None, "secret") is False
+        assert safe_compare_keys("secret", None) is False
+        assert safe_compare_keys(None, None) is False
+    
+    def test_safe_compare_empty_keys(self):
+        """Test handling of empty keys"""
+        assert safe_compare_keys("", "") is False
+        assert safe_compare_keys("", "secret") is False
+    
+    def test_safe_compare_timing_consistency(self):
+        """Test that comparison takes roughly same time regardless of match position"""
+        import time
+        
+        key = "a" * 50
+        
+        # Test different mismatch positions
+        times = []
+        for i in range(5):
+            wrong_key = "a" * i + "b" + "a" * (49 - i)
+            start = time.perf_counter()
+            for _ in range(1000):
+                safe_compare_keys(wrong_key, key)
+            elapsed = time.perf_counter() - start
+            times.append(elapsed)
+        
+        # All times should be reasonably similar (within 10x of each other)
+        max_time = max(times)
+        min_time = min(times)
+        assert max_time / min_time < 10, "Timing variance suggests non-constant-time comparison"
+
+
+class TestAPIKeySecurityImprovements:
+    """Test API key security enhancements"""
+    
+    def test_malicious_api_key_rejected(self):
+        """Test that API keys with suspicious content are rejected"""
+        app = FastAPI()
+        app.state.api_key = "valid-key"
+        
+        @app.get("/protected")
+        @require_api_key
+        async def protected_route(request: Request):
+            return {"message": "success"}
+            
+        client = TestClient(app)
+        
+        # Try SQL injection in API key
+        response = client.get("/protected", headers={"X-API-Key": "'; DROP TABLE--"})
+        assert response.status_code == 401
+        assert "Invalid API key format" in response.json()["error"]
+    
+    def test_request_id_in_error_response(self):
+        """Test that request ID is included in error responses"""
+        app = FastAPI()
+        app.add_middleware(RequestLoggingMiddleware)
+        
+        @app.get("/error")
+        def error_route():
+            raise ValueError("Test error")
+            
+        client = TestClient(app)
+        response = client.get("/error")
+        
+        assert response.status_code == 500
+        assert "request_id" in response.json()
+        assert len(response.json()["request_id"]) == 8

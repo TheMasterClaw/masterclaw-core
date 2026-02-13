@@ -1,11 +1,14 @@
 """Middleware for MasterClaw Core API
 
-Includes rate limiting, request logging, and security headers
+Includes rate limiting, request logging, security headers, and input validation
 """
 
 import time
 import logging
-from typing import Callable
+import hmac
+import re
+import uuid
+from typing import Callable, Optional
 from functools import wraps
 
 from fastapi import Request, Response
@@ -21,37 +24,121 @@ logging.basicConfig(
 logger = logging.getLogger("masterclaw")
 
 
+# =============================================================================
+# Input Sanitization Utilities
+# =============================================================================
+
+# Regex patterns for common injection attacks
+SQL_INJECTION_PATTERN = re.compile(
+    r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION|DECLARE|CAST)\b)|"
+    r"(--)|(;)|(/\*)|(\*/)|(@@)|(\bOR\b\s+\d+\s*=\s*\d+)|(\bAND\b\s+\d+\s*=\s*\d+)",
+    re.IGNORECASE
+)
+
+XSS_PATTERN = re.compile(
+    r"(<script)|(javascript:)|(on\w+\s*=)|(<iframe)|(<object)|(<embed)|"
+    r"(expression\()|(eval\()|(alert\()",
+    re.IGNORECASE
+)
+
+PATH_TRAVERSAL_PATTERN = re.compile(r"\.\./|\.\.\\|%2e%2e%2f|%2e%2e/|%2e%2e\\")
+
+def sanitize_input(value: str, max_length: int = 10000) -> str:
+    """
+    Sanitize user input to prevent injection attacks.
+    
+    Args:
+        value: The input string to sanitize
+        max_length: Maximum allowed length
+        
+    Returns:
+        Sanitized string or raises ValueError if dangerous content detected
+        
+    Raises:
+        ValueError: If potentially dangerous content is detected
+    """
+    if not isinstance(value, str):
+        return value
+    
+    # Check length
+    if len(value) > max_length:
+        raise ValueError(f"Input exceeds maximum length of {max_length} characters")
+    
+    # Check for SQL injection patterns
+    if SQL_INJECTION_PATTERN.search(value):
+        raise ValueError("Potentially dangerous input detected")
+    
+    # Check for XSS patterns
+    if XSS_PATTERN.search(value):
+        raise ValueError("Potentially dangerous input detected")
+    
+    # Check for path traversal
+    if PATH_TRAVERSAL_PATTERN.search(value):
+        raise ValueError("Potentially dangerous input detected")
+    
+    return value
+
+def safe_compare_keys(provided_key: Optional[str], expected_key: Optional[str]) -> bool:
+    """
+    Constant-time comparison of API keys to prevent timing attacks.
+    
+    Args:
+        provided_key: The API key provided in the request
+        expected_key: The expected API key
+        
+    Returns:
+        True if keys match, False otherwise
+    """
+    if not provided_key or not expected_key:
+        # Use hmac.compare_digest with dummy values to prevent timing leak
+        return hmac.compare_digest("dummy", "dummy") and False
+    
+    # Ensure both are strings and encode to bytes
+    provided = provided_key.encode('utf-8') if isinstance(provided_key, str) else b""
+    expected = expected_key.encode('utf-8') if isinstance(expected_key, str) else b""
+    
+    return hmac.compare_digest(provided, expected)
+
+
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Log all requests with timing"""
+    """Log all requests with timing and request IDs for traceability"""
     
     async def dispatch(self, request: Request, call_next: Callable):
+        # Generate or extract request ID
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
+        request.state.request_id = request_id
+        
         start_time = time.time()
         
-        # Log request
-        logger.info(f"→ {request.method} {request.url.path}")
+        # Log request with request ID
+        logger.info(f"[{request_id}] → {request.method} {request.url.path}")
         
         # Process request
         try:
             response = await call_next(request)
         except Exception as e:
-            logger.error(f"✗ {request.method} {request.url.path} - Error: {str(e)}")
+            logger.error(f"[{request_id}] ✗ {request.method} {request.url.path} - Error: {str(e)}")
             return JSONResponse(
                 status_code=500,
-                content={"error": "Internal server error"}
+                content={
+                    "error": "Internal server error",
+                    "request_id": request_id
+                }
             )
         
         # Calculate duration
         duration = time.time() - start_time
         
-        # Log response
+        # Log response with request ID
         status_icon = "✓" if response.status_code < 400 else "✗"
         logger.info(
-            f"{status_icon} {request.method} {request.url.path} "
+            f"[{request_id}] {status_icon} {request.method} {request.url.path} "
             f"- {response.status_code} - {duration:.3f}s"
         )
         
-        # Add timing header
+        # Add headers for debugging
         response.headers["X-Response-Time"] = f"{duration:.3f}s"
+        response.headers["X-Request-ID"] = request_id
         
         return response
 
@@ -126,7 +213,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 def require_api_key(func: Callable) -> Callable:
-    """Decorator to require API key for endpoint"""
+    """Decorator to require API key for endpoint with timing attack protection"""
     @wraps(func)
     async def wrapper(*args, **kwargs):
         # Extract request from args/kwargs
@@ -140,12 +227,29 @@ def require_api_key(func: Callable) -> Callable:
                 content={"error": "Request not found"}
             )
         
-        # Get API key from header
-        api_key = request.headers.get("X-API-Key")
-        expected_key = request.app.state.api_key if hasattr(request.app.state, 'api_key') else None
+        # Get request ID for logging
+        request_id = getattr(request.state, 'request_id', 'unknown')
         
-        if expected_key and api_key != expected_key:
-            logger.warning(f"Invalid API key from {request.client.host}")
+        # Get API key from header with input sanitization
+        api_key_header = request.headers.get("X-API-Key", "")
+        try:
+            api_key = sanitize_input(api_key_header, max_length=256)
+        except ValueError as e:
+            logger.warning(f"[{request_id}] Rejected API key with suspicious content")
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Invalid API key format"}
+            )
+        
+        # Get expected key from app state
+        expected_key = None
+        if hasattr(request.app.state, 'api_key'):
+            expected_key = request.app.state.api_key
+        
+        # Use constant-time comparison to prevent timing attacks
+        if expected_key and not safe_compare_keys(api_key, expected_key):
+            client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+            logger.warning(f"[{request_id}] Invalid API key attempt from {client_ip}")
             return JSONResponse(
                 status_code=401,
                 content={"error": "Invalid or missing API key"}
