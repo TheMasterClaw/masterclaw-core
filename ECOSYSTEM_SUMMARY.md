@@ -15,7 +15,7 @@
 | **Total Files** | 90+ |
 | **Total Lines of Code** | 6,000+ |
 | **Docker Services** | 10 |
-| **CLI Commands** | 15+ |
+| **CLI Commands** | 20+ |
 | **API Endpoints** | 20+ |
 | **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
@@ -51,6 +51,7 @@
 - ✅ Centralized log aggregation with 30-day retention
 - ✅ Automated backups with rotation
 - ✅ **SSL certificate expiration monitoring** (14-day warning, 7-day critical)
+- ✅ **Proactive health monitoring** with alerting integration (`mc health --notify`)
 - ✅ CI/CD with GitHub Actions
 - ✅ One-command install/uninstall
 
@@ -135,6 +136,10 @@ mc dashboard --all  # Open all dashboards
 mc dashboard open grafana    # Open Grafana
 mc dashboard open prometheus # Open Prometheus
 mc export           # Export all data
+mc health           # Comprehensive health check
+mc health --watch   # Continuous health monitoring
+mc health --notify  # Send alerts when unhealthy
+mc health --compact # Cron-friendly output
 ```
 
 ---
