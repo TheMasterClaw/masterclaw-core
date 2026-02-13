@@ -47,10 +47,12 @@
 **Features:**
 - ✅ SSL/TLS automatic certificates
 - ✅ Reverse proxy with Traefik
+- ✅ **Zero-downtime blue-green deployment** with automatic rollback
+- ✅ Canary deployment support (gradual traffic shifting)
+- ✅ **SSL certificate expiration monitoring** (14-day warning, 7-day critical)
 - ✅ Monitoring with Prometheus + Grafana + **Loki**
 - ✅ Centralized log aggregation with 30-day retention
 - ✅ Automated backups with rotation
-- ✅ **SSL certificate expiration monitoring** (14-day warning, 7-day critical)
 - ✅ **Proactive health monitoring** with alerting integration (`mc health --notify`)
 - ✅ CI/CD with GitHub Actions
 - ✅ One-command install/uninstall
@@ -110,6 +112,10 @@
 ```bash
 mc status           # Check health
 mc status --watch   # Continuous monitoring
+mc deploy rolling   # Zero-downtime blue-green deployment
+mc deploy canary 10 # Canary deployment (10% traffic)
+mc deploy rollback  # Rollback to previous version
+mc deploy status    # Show deployment status
 mc logs [service]   # View logs
 mc backup           # Create backup
 mc restore          # Restore from backup
