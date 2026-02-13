@@ -250,6 +250,56 @@ class TestExceptionHandlers:
         assert "Rate limit" in body
 
 
+class TestMiddlewareIntegration:
+    """Test middleware integration in the main app"""
+    
+    def test_security_headers_present(self):
+        """Test that security headers are added by SecurityHeadersMiddleware"""
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["X-XSS-Protection"] == "1; mode=block"
+        assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+        assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+    
+    def test_request_logging_headers(self):
+        """Test that request logging middleware adds timing header"""
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        assert "X-Response-Time" in response.headers
+        # Verify it's a valid time format
+        time_str = response.headers["X-Response-Time"]
+        assert time_str.endswith("s")
+        assert float(time_str.rstrip("s")) >= 0
+    
+    def test_rate_limit_headers_present(self):
+        """Test that rate limit headers are added"""
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        assert "X-RateLimit-Limit" in response.headers
+        assert "X-RateLimit-Remaining" in response.headers
+    
+    def test_validation_error_format(self):
+        """Test that validation errors return structured format"""
+        response = client.post("/v1/chat", json={})  # Missing required 'message' field
+        
+        assert response.status_code == 422
+        data = response.json()
+        assert "error" in data
+        assert data["error"] == "Validation error"
+        assert "errors" in data
+        assert isinstance(data["errors"], list)
+        # Each error should have field, message, and type
+        for error in data["errors"]:
+            assert "field" in error
+            assert "message" in error
+            assert "type" in error
+
+
 class TestCORSHeaders:
     """Test CORS configuration"""
     

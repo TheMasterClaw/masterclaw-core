@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     LOG_LEVEL: str = "info"
     
+    # Security Configuration
+    RATE_LIMIT_PER_MINUTE: int = 60
+    CORS_ORIGINS: list[str] = ["*"]  # Configure for production
+    
     # LLM Configuration
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None

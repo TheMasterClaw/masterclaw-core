@@ -1,9 +1,13 @@
 """Main FastAPI application for MasterClaw Core"""
 
+import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
 from .config import settings
@@ -24,6 +28,28 @@ from .analytics import analytics
 from .llm import router as llm_router
 from .memory import get_memory_store, MemoryStore
 from .websocket import manager
+from .middleware import (
+    RequestLoggingMiddleware,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
+from .exceptions import (
+    MasterClawException,
+    masterclaw_exception_handler,
+    http_exception_handler,
+    validation_exception_handler,
+    general_exception_handler,
+)
+
+# Configure structured logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("masterclaw")
 
 
 # Global memory store
@@ -36,15 +62,15 @@ async def lifespan(app: FastAPI):
     global memory
     
     # Startup
-    print(f"🐾 MasterClaw Core v{__version__} starting...")
+    logger.info(f"🐾 MasterClaw Core v{__version__} starting...")
     memory = get_memory_store()
-    print(f"✅ Memory store initialized ({settings.MEMORY_BACKEND})")
-    print(f"✅ LLM providers: {llm_router.list_providers()}")
+    logger.info(f"✅ Memory store initialized ({settings.MEMORY_BACKEND})")
+    logger.info(f"✅ LLM providers: {llm_router.list_providers()}")
     
     yield
     
     # Shutdown
-    print("🛑 MasterClaw Core shutting down...")
+    logger.info("🛑 MasterClaw Core shutting down...")
 
 
 # Create FastAPI app
@@ -55,10 +81,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Register exception handlers
+app.add_exception_handler(MasterClawException, masterclaw_exception_handler)
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
+
+# Add security and logging middleware (order matters - last added = first executed)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=settings.RATE_LIMIT_PER_MINUTE)
+app.add_middleware(RequestLoggingMiddleware)
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
