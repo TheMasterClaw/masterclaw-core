@@ -1,0 +1,191 @@
+name: Test MasterClawInterface Backend
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'MasterClawInterface/backend/**'
+      - '.github/workflows/test-masterclawinterface-backend.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'MasterClawInterface/backend/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./MasterClawInterface/backend
+
+    strategy:
+      matrix:
+        node-version: ['18.x', '20.x', '22.x']
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: MasterClawInterface/backend/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run tests with coverage
+      run: npm run test -- --coverage
+      timeout-minutes: 5
+      env:
+        NODE_ENV: test
+        MASTERCLAW_API_TOKEN: test-token-for-ci
+
+    - name: Check for security vulnerabilities
+      run: npm audit --audit-level=moderate
+      continue-on-error: true
+
+  security-validation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./MasterClawInterface/backend
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        cache-dependency-path: MasterClawInterface/backend/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Verify security middleware exports
+      run: |
+        node -e "
+          import('./src/middleware/security.js').then(security => {
+            console.log('✅ Security middleware loaded successfully');
+            const exports = Object.keys(security);
+            console.log('Exported functions:', exports);
+            
+            // Verify critical security functions exist
+            const required = [
+              'isValidId', 
+              'validateIdParam', 
+              'sanitizeBody', 
+              'validateTaskExists',
+              'validateEventExists',
+              'validateQueryParams',
+              'asyncHandler',
+              'errorHandler',
+              'authenticateApiToken'
+            ];
+            
+            let missing = false;
+            for (const fn of required) {
+              if (typeof security[fn] !== 'function') {
+                console.error('❌ Missing required function:', fn);
+                missing = true;
+              } else {
+                console.log('✅', fn, 'is exported');
+              }
+            }
+            
+            if (missing) process.exit(1);
+            console.log('✅ All security middleware functions verified');
+          }).catch(err => {
+            console.error('❌ Failed to load security middleware:', err.message);
+            process.exit(1);
+          });
+        "
+
+    - name: Verify timeout middleware exports
+      run: |
+        node -e "
+          import('./src/middleware/timeout.js').then(timeout => {
+            console.log('✅ Timeout middleware loaded successfully');
+            const exports = Object.keys(timeout);
+            console.log('Exported functions:', exports);
+            
+            // Verify required functions
+            if (typeof timeout.requestTimeout !== 'function') {
+              console.error('❌ Missing requestTimeout function');
+              process.exit(1);
+            }
+            console.log('✅ requestTimeout is exported');
+            
+            if (typeof timeout.timeoutFor !== 'function') {
+              console.error('❌ Missing timeoutFor function');
+              process.exit(1);
+            }
+            console.log('✅ timeoutFor is exported');
+            
+            console.log('✅ All timeout middleware functions verified');
+          }).catch(err => {
+            console.error('❌ Failed to load timeout middleware:', err.message);
+            process.exit(1);
+          });
+        "
+
+    - name: Run security-focused tests
+      run: |
+        echo "=== Running Request Timeout Tests ==="
+        npm run test -- --reporter=verbose tests/request-timeout.test.js
+        echo ""
+        echo "=== Running Body Size Limit Tests ==="
+        npm run test -- --reporter=verbose tests/security-body-limits.test.js
+      env:
+        NODE_ENV: test
+        MASTERCLAW_API_TOKEN: test-token-for-ci
+
+  integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./MasterClawInterface/backend
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        cache-dependency-path: MasterClawInterface/backend/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Verify server starts without errors
+      run: |
+        # Create a test environment file
+        echo "PORT=3001" > .env.test
+        echo "MASTERCLAW_API_TOKEN=test-integration-token" >> .env.test
+        echo "FRONTEND_URL=http://localhost:5173" >> .env.test
+        echo "BODY_LIMIT_GENERAL=100kb" >> .env.test
+        echo "BODY_LIMIT_TTS=1mb" >> .env.test
+        echo "REQUEST_TIMEOUT_MS=30000" >> .env.test
+        
+        # Start server in background and capture output
+        timeout 10s node src/index.js &
+        SERVER_PID=$!
+        sleep 3
+        
+        # Check if server is still running
+        if ps -p $SERVER_PID > /dev/null; then
+          echo "✅ Server started successfully"
+          kill $SERVER_PID 2>/dev/null || true
+        else
+          echo "❌ Server failed to start or crashed"
+          exit 1
+        fi
+      timeout-minutes: 2
