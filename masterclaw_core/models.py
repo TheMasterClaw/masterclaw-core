@@ -1,0 +1,73 @@
+"""Pydantic models for MasterClaw Core"""
+
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Literal
+from datetime import datetime
+
+
+class ChatRequest(BaseModel):
+    """Request model for chat completions"""
+    message: str = Field(..., description="User message", min_length=1)
+    session_id: Optional[str] = Field(None, description="Session identifier for context")
+    model: Optional[str] = Field(None, description="LLM model to use")
+    provider: Optional[Literal["openai", "anthropic"]] = Field(None, description="LLM provider")
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
+    max_tokens: Optional[int] = Field(None, ge=1, le=4096)
+    system_prompt: Optional[str] = Field(None, description="Custom system prompt")
+    use_memory: bool = Field(True, description="Whether to use memory retrieval")
+
+
+class ChatResponse(BaseModel):
+    """Response model for chat completions"""
+    response: str = Field(..., description="AI response")
+    model: str = Field(..., description="Model used")
+    provider: str = Field(..., description="Provider used")
+    session_id: Optional[str] = Field(None, description="Session identifier")
+    tokens_used: Optional[int] = Field(None, description="Total tokens used")
+    memories_used: int = Field(0, description="Number of memories retrieved")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class MemoryEntry(BaseModel):
+    """Model for memory entries"""
+    id: Optional[str] = Field(None, description="Memory ID")
+    content: str = Field(..., description="Memory content", min_length=1)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    source: Optional[str] = Field(None, description="Source of memory")
+
+
+class MemorySearchRequest(BaseModel):
+    """Request model for memory search"""
+    query: str = Field(..., description="Search query", min_length=1)
+    top_k: int = Field(5, ge=1, le=20, description="Number of results")
+    filter_metadata: Optional[Dict[str, Any]] = Field(None, description="Metadata filters")
+
+
+class MemorySearchResponse(BaseModel):
+    """Response model for memory search"""
+    query: str = Field(..., description="Original query")
+    results: List[MemoryEntry] = Field(default_factory=list)
+    total_results: int = Field(0, description="Total matching results")
+
+
+class HealthResponse(BaseModel):
+    """Health check response"""
+    status: str = Field("healthy", description="Service status")
+    version: str = Field(..., description="API version")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    services: Dict[str, str] = Field(default_factory=dict, description="Service statuses")
+
+
+class ToolRequest(BaseModel):
+    """Request model for tool execution"""
+    tool: str = Field(..., description="Tool name")
+    action: str = Field(..., description="Action to perform")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Tool parameters")
+
+
+class ToolResponse(BaseModel):
+    """Response model for tool execution"""
+    success: bool = Field(..., description="Whether the tool executed successfully")
+    result: Any = Field(None, description="Tool result")
+    error: Optional[str] = Field(None, description="Error message if failed")

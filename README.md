@@ -2,35 +2,10 @@
 
 The AI brain — LLM integrations, memory systems, agent orchestration, and tool handlers.
 
-## Overview
-
-This is the intelligence layer that powers MasterClaw. It handles:
-
-- **LLM Integration** — OpenAI, Anthropic, local models
-- **Memory Systems** — Short-term context, long-term embeddings
-- **Agent Orchestration** — Multi-step reasoning, tool use
-- **Tool Handlers** — Extensible tool system
-
-## Architecture
-
-```
-┌─────────────────────────────────────────┐
-│  API Layer (FastAPI)                    │
-├─────────────────────────────────────────┤
-│  Agent Orchestrator                     │
-├─────────────────────────────────────────┤
-│  LLM Router (OpenAI, Anthropic, Local)  │
-├─────────────────────────────────────────┤
-│  Memory Store (Embeddings + Vector DB)  │
-├─────────────────────────────────────────┤
-│  Tool Registry                          │
-└─────────────────────────────────────────┘
-```
-
 ## Quick Start
 
 ```bash
-# Install
+# Install dependencies
 pip install -r requirements.txt
 
 # Configure
@@ -41,43 +16,88 @@ cp .env.example .env
 python -m masterclaw_core
 ```
 
-## API
+## API Endpoints
+
+### Health
+```bash
+GET /health
+```
 
 ### Chat
 ```bash
 POST /v1/chat
 {
-  "message": "What did we discuss yesterday?",
-  "session_id": "abc123"
+  "message": "Hello, MasterClaw!",
+  "session_id": "abc123",
+  "provider": "openai",
+  "model": "gpt-4",
+  "use_memory": true
 }
 ```
 
-### Memory Search
+### Memory
 ```bash
+# Search memories
 POST /v1/memory/search
 {
   "query": "backup strategy",
   "top_k": 5
 }
-```
 
-### Tool Call
-```bash
-POST /v1/tools/execute
+# Add memory
+POST /v1/memory/add
 {
-  "tool": "github",
-  "action": "create_issue",
-  "params": {...}
+  "content": "Remember to backup daily",
+  "metadata": {"priority": "high"},
+  "source": "user_instruction"
 }
+
+# Get memory
+GET /v1/memory/{memory_id}
+
+# Delete memory
+DELETE /v1/memory/{memory_id}
 ```
 
-## Related Repos
+## Architecture
 
-- [masterclaw-interface](https://github.com/TheMasterClaw/MasterClawInterface) — The UI
+```
+masterclaw_core/
+├── __init__.py        # Package info
+├── __main__.py        # Entry point
+├── main.py            # FastAPI app
+├── config.py          # Settings
+├── models.py          # Pydantic models
+├── llm.py             # LLM router (OpenAI, Anthropic)
+└── memory.py          # Memory store (Chroma, JSON)
+```
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENAI_API_KEY` | - | OpenAI API key |
+| `ANTHROPIC_API_KEY` | - | Anthropic API key |
+| `DEFAULT_MODEL` | gpt-4 | Default LLM model |
+| `MEMORY_BACKEND` | chroma | Memory backend (chroma/json) |
+| `CHROMA_PERSIST_DIR` | ./data/chroma | ChromaDB directory |
+| `PORT` | 8000 | API port |
+
+## Docker
+
+```bash
+# Build
+docker build -t masterclaw-core .
+
+# Run
+docker run -p 8000:8000 --env-file .env masterclaw-core
+```
+
+## Related
+
 - [masterclaw-infrastructure](https://github.com/TheMasterClaw/masterclaw-infrastructure) — Deployment
-- [masterclaw-tools](https://github.com/TheMasterClaw/masterclaw-tools) — CLI utilities
-- [rex-deus](https://github.com/TheMasterClaw/rex-deus) — Personal configs (private)
-- [level100-studios](https://github.com/TheMasterClaw/level100-studios) — Parent org
+- [masterclaw-tools](https://github.com/TheMasterClaw/masterclaw-tools) — CLI
+- [MasterClawInterface](https://github.com/TheMasterClaw/MasterClawInterface) — The UI
 
 ---
 
