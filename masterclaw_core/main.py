@@ -696,7 +696,13 @@ async def chat_stream(websocket: WebSocket, session_id: str):
     """
     WebSocket endpoint for real-time streaming chat.
     
-    Connect to this endpoint for token-by-token streaming responses.
+    Security features:
+    - Session ID validation (alphanumeric, 1-64 chars)
+    - Max 5 concurrent connections per session
+    - Max 10 concurrent connections per IP
+    - Rate limiting: 100 messages per 60 seconds
+    - Max message size: 64KB
+    - Connection timeout: 1 hour
     
     Message format (JSON):
     {
@@ -709,15 +715,28 @@ async def chat_stream(websocket: WebSocket, session_id: str):
         "use_memory": true (optional, default: true)
     }
     """
-    await manager.connect(websocket, session_id)
+    connected = await manager.connect(websocket, session_id)
+    if not connected:
+        return  # Connection was rejected by security checks
     
     try:
         while True:
-            # Receive message from client
-            data = await websocket.receive_json()
+            # Receive and validate message using security-hardened method
+            data = await manager.validate_and_receive(websocket)
             
-            # Extract parameters
+            if data is None:
+                continue  # Validation failed, error already sent
+            
+            # Extract parameters with validation
             user_message = data.get("message", "")
+            if not isinstance(user_message, str):
+                await manager.send_to_client(websocket, {
+                    "type": "error",
+                    "error": "Message must be a string",
+                    "code": "INVALID_MESSAGE_TYPE",
+                })
+                continue
+            
             provider = data.get("provider")
             model = data.get("model")
             temperature = data.get("temperature", 0.7)
@@ -725,21 +744,45 @@ async def chat_stream(websocket: WebSocket, session_id: str):
             system_prompt = data.get("system_prompt")
             use_memory = data.get("use_memory", True)
             
-            if not user_message:
+            if not user_message.strip():
                 await manager.send_to_client(websocket, {
                     "type": "error",
-                    "error": "Message is required",
+                    "error": "Message is required and cannot be empty",
+                    "code": "EMPTY_MESSAGE",
                 })
                 continue
+            
+            # Validate temperature range
+            if not isinstance(temperature, (int, float)) or not (0 <= temperature <= 2):
+                await manager.send_to_client(websocket, {
+                    "type": "error",
+                    "error": "Temperature must be between 0 and 2",
+                    "code": "INVALID_TEMPERATURE",
+                })
+                continue
+            
+            # Validate max_tokens
+            if max_tokens is not None:
+                if not isinstance(max_tokens, int) or max_tokens < 1 or max_tokens > 32000:
+                    await manager.send_to_client(websocket, {
+                        "type": "error",
+                        "error": "max_tokens must be between 1 and 32000",
+                        "code": "INVALID_MAX_TOKENS",
+                    })
+                    continue
             
             # Retrieve memories if enabled
             memories = []
             if use_memory and session_id:
-                memories = await memory.search(
-                    query=user_message,
-                    top_k=5,
-                    filter_metadata={"session_id": session_id},
-                )
+                try:
+                    memories = await memory.search(
+                        query=user_message,
+                        top_k=5,
+                        filter_metadata={"session_id": session_id},
+                    )
+                except Exception as e:
+                    logger.error(f"Memory search error in websocket: {e}")
+                    # Continue without memories rather than failing
             
             # Build system prompt with memories
             final_system_prompt = system_prompt or (
@@ -788,16 +831,20 @@ async def chat_stream(websocket: WebSocket, session_id: str):
                 
                 # Store interaction in memory
                 if session_id:
-                    await memory.add(
-                        content=f"User: {user_message}\nAssistant: {full_response}",
-                        metadata={
-                            "session_id": session_id,
-                            "type": "chat_interaction",
-                            "provider": provider or "openai",
-                        },
-                        source="chat_stream",
-                    )
-                    
+                    try:
+                        await memory.add(
+                            content=f"User: {user_message}\nAssistant: {full_response}",
+                            metadata={
+                                "session_id": session_id,
+                                "type": "chat_interaction",
+                                "provider": provider or "openai",
+                            },
+                            source="chat_stream",
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to store memory: {e}")
+                        # Don't fail the response if memory storage fails
+                        
             except ValueError as e:
                 await manager.send_to_client(websocket, {
                     "type": "error",
@@ -805,6 +852,7 @@ async def chat_stream(websocket: WebSocket, session_id: str):
                     "code": "INVALID_PROVIDER",
                 })
             except Exception as e:
+                logger.error(f"Streaming error: {e}")
                 await manager.send_to_client(websocket, {
                     "type": "error",
                     "error": f"Streaming error: {str(e)}",
@@ -814,12 +862,12 @@ async def chat_stream(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         manager.disconnect(websocket, session_id)
     except Exception as e:
-        # Handle any unexpected errors
+        logger.error(f"WebSocket error: {e}")
         try:
             await manager.send_to_client(websocket, {
                 "type": "error",
-                "error": str(e),
-                "code": "WEBSOCKET_ERROR",
+                "error": "Internal server error",
+                "code": "INTERNAL_ERROR",
             })
         except:
             pass
