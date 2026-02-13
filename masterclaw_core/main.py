@@ -4,6 +4,8 @@ import logging
 import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +25,10 @@ from .models import (
     AnalyticsStatsRequest,
     AnalyticsStatsResponse,
     AnalyticsSummaryResponse,
+    SessionListResponse,
+    SessionInfo,
+    SessionHistoryResponse,
+    SessionDeleteResponse,
 )
 
 from .analytics import analytics
@@ -118,8 +124,13 @@ async def root():
             "/v1/chat/stream/{session_id} (WebSocket)",
             "/v1/memory/search",
             "/v1/memory/add",
+            "/v1/memory/{memory_id}",
             "/v1/analytics",
             "/v1/analytics/stats",
+            "/v1/sessions",
+            "/v1/sessions/{session_id}",
+            "/v1/sessions/{session_id} (DELETE)",
+            "/v1/sessions/stats/summary",
         ],
     }
 
@@ -345,8 +356,263 @@ async def delete_memory(memory_id: str):
 
 
 # =============================================================================
-# Analytics Endpoints
+# Session Management Endpoints
 # =============================================================================
+
+@app.get("/v1/sessions", response_model=SessionListResponse, tags=["sessions"])
+async def list_sessions(
+    limit: int = 100,
+    offset: int = 0,
+    active_since_hours: Optional[int] = None
+):
+    """
+    List all chat sessions.
+    
+    - **limit**: Maximum number of sessions to return (1-500, default: 100)
+    - **offset**: Pagination offset (default: 0)
+    - **active_since_hours**: Only show sessions active within last N hours (optional)
+    
+    Returns session IDs, creation times, last activity, and message counts.
+    """
+    try:
+        # Search for all chat interaction memories to extract sessions
+        all_memories = await memory.search(
+            query="chat_interaction",
+            top_k=limit + offset,
+            filter_metadata={"type": "chat_interaction"}
+        )
+        
+        # Group memories by session_id
+        sessions_dict: Dict[str, Dict[str, Any]] = {}
+        
+        for mem in all_memories:
+            session_id = mem.metadata.get("session_id")
+            if not session_id:
+                continue
+            
+            if session_id not in sessions_dict:
+                sessions_dict[session_id] = {
+                    "session_id": session_id,
+                    "created_at": mem.timestamp,
+                    "last_active": mem.timestamp,
+                    "message_count": 0,
+                    "metadata": {"sources": set()}
+                }
+            
+            session = sessions_dict[session_id]
+            session["message_count"] += 1
+            
+            # Track earliest and latest timestamps
+            if mem.timestamp < session["created_at"]:
+                session["created_at"] = mem.timestamp
+            if mem.timestamp > session["last_active"]:
+                session["last_active"] = mem.timestamp
+            
+            # Track sources
+            if mem.source:
+                session["metadata"]["sources"].add(mem.source)
+        
+        # Convert sets to lists for JSON serialization
+        for session in sessions_dict.values():
+            session["metadata"]["sources"] = list(session["metadata"]["sources"])
+        
+        # Filter by active_since if specified
+        if active_since_hours:
+            from datetime import timedelta
+            cutoff = datetime.utcnow() - timedelta(hours=active_since_hours)
+            sessions_dict = {
+                sid: s for sid, s in sessions_dict.items()
+                if s["last_active"] >= cutoff
+            }
+        
+        # Sort by last_active (newest first)
+        sorted_sessions = sorted(
+            sessions_dict.values(),
+            key=lambda x: x["last_active"],
+            reverse=True
+        )
+        
+        # Apply pagination
+        total = len(sorted_sessions)
+        paginated = sorted_sessions[offset:offset + limit]
+        
+        # Convert to SessionInfo objects
+        sessions = [
+            SessionInfo(
+                session_id=s["session_id"],
+                created_at=s["created_at"],
+                last_active=s["last_active"],
+                message_count=s["message_count"],
+                metadata=s["metadata"]
+            )
+            for s in paginated
+        ]
+        
+        prom_metrics.track_request("GET", "/v1/sessions", 200, 0)
+        
+        return SessionListResponse(
+            sessions=sessions,
+            total=total,
+            limit=limit,
+            offset=offset
+        )
+    
+    except Exception as e:
+        prom_metrics.track_request("GET", "/v1/sessions", 500, 0)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Session list error: {str(e)}"
+        )
+
+
+@app.get("/v1/sessions/{session_id}", response_model=SessionHistoryResponse, tags=["sessions"])
+async def get_session_history(
+    session_id: str,
+    limit: int = 50,
+    offset: int = 0
+):
+    """
+    Get detailed chat history for a specific session.
+    
+    - **session_id**: The session identifier
+    - **limit**: Maximum messages to return (1-100, default: 50)
+    - **offset**: Pagination offset (default: 0)
+    
+    Returns all messages in the session with timestamps.
+    """
+    try:
+        # Search for memories with this session_id
+        all_memories = await memory.search(
+            query="",
+            top_k=1000,  # Get all to filter and sort
+            filter_metadata={
+                "session_id": session_id,
+                "type": "chat_interaction"
+            }
+        )
+        
+        if not all_memories:
+            prom_metrics.track_request("GET", "/v1/sessions/{id}", 404, 0)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session '{session_id}' not found or has no messages"
+            )
+        
+        # Sort by timestamp (oldest first for conversation flow)
+        all_memories.sort(key=lambda m: m.timestamp)
+        
+        # Calculate session duration
+        first_msg = all_memories[0].timestamp
+        last_msg = all_memories[-1].timestamp
+        duration_minutes = (last_msg - first_msg).total_seconds() / 60
+        
+        # Apply pagination
+        total = len(all_memories)
+        paginated = all_memories[offset:offset + limit]
+        
+        prom_metrics.track_request("GET", "/v1/sessions/{id}", 200, 0)
+        
+        return SessionHistoryResponse(
+            session_id=session_id,
+            messages=paginated,
+            total_messages=total,
+            session_duration_minutes=duration_minutes if total > 1 else None
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        prom_metrics.track_request("GET", "/v1/sessions/{id}", 500, 0)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Session history error: {str(e)}"
+        )
+
+
+@app.delete("/v1/sessions/{session_id}", response_model=SessionDeleteResponse, tags=["sessions"])
+async def delete_session(session_id: str):
+    """
+    Delete a session and all associated chat memories.
+    
+    - **session_id**: The session identifier to delete
+    
+    Returns the number of memories deleted.
+    """
+    try:
+        # Find all memories for this session
+        all_memories = await memory.search(
+            query="",
+            top_k=1000,
+            filter_metadata={"session_id": session_id}
+        )
+        
+        deleted_count = 0
+        for mem in all_memories:
+            if mem.id and await memory.delete(mem.id):
+                deleted_count += 1
+        
+        prom_metrics.track_memory_operation("delete", success=True)
+        
+        return SessionDeleteResponse(
+            success=True,
+            session_id=session_id,
+            memories_deleted=deleted_count,
+            message=f"Session '{session_id}' deleted with {deleted_count} associated memories"
+        )
+    
+    except Exception as e:
+        prom_metrics.track_memory_operation("delete", success=False)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Session deletion error: {str(e)}"
+        )
+
+
+@app.get("/v1/sessions/stats/summary", tags=["sessions"])
+async def get_session_stats():
+    """
+    Get aggregate session statistics.
+    
+    Returns overall session metrics including total sessions, 
+    average messages per session, and active sessions in last 24h.
+    """
+    try:
+        # Get all sessions first
+        sessions_response = await list_sessions(limit=500, offset=0)
+        sessions = sessions_response.sessions
+        
+        from datetime import timedelta
+        
+        # Calculate stats
+        total_sessions = len(sessions)
+        total_messages = sum(s.message_count for s in sessions)
+        avg_messages = total_messages / total_sessions if total_sessions > 0 else 0
+        
+        # Active in last 24 hours
+        cutoff_24h = datetime.utcnow() - timedelta(hours=24)
+        active_24h = sum(1 for s in sessions if s.last_active >= cutoff_24h)
+        
+        # Active in last 7 days
+        cutoff_7d = datetime.utcnow() - timedelta(days=7)
+        active_7d = sum(1 for s in sessions if s.last_active >= cutoff_7d)
+        
+        prom_metrics.track_request("GET", "/v1/sessions/stats/summary", 200, 0)
+        
+        return {
+            "total_sessions": total_sessions,
+            "total_messages": total_messages,
+            "average_messages_per_session": round(avg_messages, 2),
+            "active_sessions_24h": active_24h,
+            "active_sessions_7d": active_7d,
+            "timestamp": datetime.utcnow()
+        }
+    
+    except Exception as e:
+        prom_metrics.track_request("GET", "/v1/sessions/stats/summary", 500, 0)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Session stats error: {str(e)}"
+        )
 
 @app.get("/v1/analytics", response_model=AnalyticsSummaryResponse, tags=["analytics"])
 async def analytics_summary():

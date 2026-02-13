@@ -96,3 +96,40 @@ class AnalyticsSummaryResponse(BaseModel):
     tracked_metrics: List[str] = Field(default_factory=list, description="Available metrics")
     endpoints: List[str] = Field(default_factory=list, description="Analytics endpoints")
     retention_days: int = Field(30, description="Data retention period")
+
+
+# =============================================================================
+# Session Management Models
+# =============================================================================
+
+class SessionInfo(BaseModel):
+    """Information about a chat session"""
+    session_id: str = Field(..., description="Unique session identifier")
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Session creation time")
+    last_active: datetime = Field(default_factory=datetime.utcnow, description="Last activity timestamp")
+    message_count: int = Field(0, description="Number of messages in session")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Session metadata")
+
+
+class SessionListResponse(BaseModel):
+    """Response for listing sessions"""
+    sessions: List[SessionInfo] = Field(default_factory=list, description="List of sessions")
+    total: int = Field(0, description="Total number of sessions")
+    limit: int = Field(100, description="Max sessions returned")
+    offset: int = Field(0, description="Pagination offset")
+
+
+class SessionHistoryResponse(BaseModel):
+    """Response for session chat history"""
+    session_id: str = Field(..., description="Session identifier")
+    messages: List[MemoryEntry] = Field(default_factory=list, description="Chat messages in session")
+    total_messages: int = Field(0, description="Total message count")
+    session_duration_minutes: Optional[float] = Field(None, description="Session duration in minutes")
+
+
+class SessionDeleteResponse(BaseModel):
+    """Response for session deletion"""
+    success: bool = Field(..., description="Whether deletion succeeded")
+    session_id: str = Field(..., description="Deleted session ID")
+    memories_deleted: int = Field(0, description="Number of associated memories deleted")
+    message: str = Field(..., description="Status message")

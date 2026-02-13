@@ -76,6 +76,21 @@ GET /v1/memory/{memory_id}
 DELETE /v1/memory/{memory_id}
 ```
 
+### Sessions
+```bash
+# List all sessions
+GET /v1/sessions?limit=100&active_since_hours=24
+
+# Get session chat history
+GET /v1/sessions/{session_id}?limit=50
+
+# Delete a session and all its messages
+DELETE /v1/sessions/{session_id}
+
+# Get session statistics
+GET /v1/sessions/stats/summary
+```
+
 ## Architecture
 
 ```
