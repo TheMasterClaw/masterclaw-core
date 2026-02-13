@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
@@ -17,6 +17,7 @@ from .models import (
 )
 from .llm import router as llm_router
 from .memory import get_memory_store, MemoryStore
+from .websocket import manager
 
 
 # Global memory store
@@ -68,6 +69,7 @@ async def root():
         "endpoints": [
             "/health",
             "/v1/chat",
+            "/v1/chat/stream/{session_id} (WebSocket)",
             "/v1/memory/search",
             "/v1/memory/add",
         ],
@@ -233,3 +235,139 @@ async def delete_memory(memory_id: str):
         "success": True,
         "message": "Memory deleted successfully",
     }
+
+
+@app.websocket("/v1/chat/stream/{session_id}")
+async def chat_stream(websocket: WebSocket, session_id: str):
+    """
+    WebSocket endpoint for real-time streaming chat.
+    
+    Connect to this endpoint for token-by-token streaming responses.
+    
+    Message format (JSON):
+    {
+        "message": "Your message here",
+        "provider": "openai" | "anthropic" (optional),
+        "model": "model-name" (optional),
+        "temperature": 0.7 (optional),
+        "max_tokens": 1024 (optional),
+        "system_prompt": "custom prompt" (optional),
+        "use_memory": true (optional, default: true)
+    }
+    """
+    await manager.connect(websocket, session_id)
+    
+    try:
+        while True:
+            # Receive message from client
+            data = await websocket.receive_json()
+            
+            # Extract parameters
+            user_message = data.get("message", "")
+            provider = data.get("provider")
+            model = data.get("model")
+            temperature = data.get("temperature", 0.7)
+            max_tokens = data.get("max_tokens")
+            system_prompt = data.get("system_prompt")
+            use_memory = data.get("use_memory", True)
+            
+            if not user_message:
+                await manager.send_to_client(websocket, {
+                    "type": "error",
+                    "error": "Message is required",
+                })
+                continue
+            
+            # Retrieve memories if enabled
+            memories = []
+            if use_memory and session_id:
+                memories = await memory.search(
+                    query=user_message,
+                    top_k=5,
+                    filter_metadata={"session_id": session_id},
+                )
+            
+            # Build system prompt with memories
+            final_system_prompt = system_prompt or (
+                "You are MasterClaw, an AI familiar bound to Rex deus. "
+                "Be helpful, direct, and slightly mischievous when appropriate."
+            )
+            
+            if memories:
+                memory_context = "\n\nRelevant context from memory:\n" + "\n".join(
+                    f"- {m.content}" for m in memories
+                )
+                final_system_prompt += memory_context
+            
+            # Send start event
+            await manager.send_to_client(websocket, {
+                "type": "start",
+                "session_id": session_id,
+                "model": model or "default",
+                "provider": provider or "openai",
+            })
+            
+            # Stream the response
+            full_response = ""
+            try:
+                llm_provider = llm_router.get_provider(provider or "openai")
+                
+                async for token in llm_provider.stream(
+                    message=user_message,
+                    system_prompt=final_system_prompt,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                ):
+                    full_response += token
+                    await manager.send_to_client(websocket, {
+                        "type": "token",
+                        "token": token,
+                    })
+                
+                # Send completion event
+                await manager.send_to_client(websocket, {
+                    "type": "complete",
+                    "response": full_response,
+                    "memories_used": len(memories),
+                })
+                
+                # Store interaction in memory
+                if session_id:
+                    await memory.add(
+                        content=f"User: {user_message}\nAssistant: {full_response}",
+                        metadata={
+                            "session_id": session_id,
+                            "type": "chat_interaction",
+                            "provider": provider or "openai",
+                        },
+                        source="chat_stream",
+                    )
+                    
+            except ValueError as e:
+                await manager.send_to_client(websocket, {
+                    "type": "error",
+                    "error": str(e),
+                    "code": "INVALID_PROVIDER",
+                })
+            except Exception as e:
+                await manager.send_to_client(websocket, {
+                    "type": "error",
+                    "error": f"Streaming error: {str(e)}",
+                    "code": "STREAM_ERROR",
+                })
+                
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, session_id)
+    except Exception as e:
+        # Handle any unexpected errors
+        try:
+            await manager.send_to_client(websocket, {
+                "type": "error",
+                "error": str(e),
+                "code": "WEBSOCKET_ERROR",
+            })
+        except:
+            pass
+        finally:
+            manager.disconnect(websocket, session_id)
