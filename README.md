@@ -23,6 +23,23 @@ python -m masterclaw_core
 GET /health
 ```
 
+### Metrics (Prometheus)
+```bash
+GET /metrics
+```
+
+Returns Prometheus-formatted metrics for monitoring:
+- `masterclaw_http_requests_total` - Total HTTP requests by method, endpoint, status
+- `masterclaw_http_request_duration_seconds` - Request latency histogram
+- `masterclaw_chat_requests_total` - Chat requests by provider and model
+- `masterclaw_chat_tokens_total` - Token usage counter
+- `masterclaw_memory_operations_total` - Memory operations by type and status
+- `masterclaw_memory_search_duration_seconds` - Memory search latency
+- `masterclaw_active_sessions` - Gauge of active sessions
+- `masterclaw_memory_entries_total` - Gauge of total memory entries
+- `masterclaw_llm_requests_total` - LLM API requests by provider
+- `masterclaw_llm_request_duration_seconds` - LLM request latency
+
 ### Chat
 ```bash
 POST /v1/chat

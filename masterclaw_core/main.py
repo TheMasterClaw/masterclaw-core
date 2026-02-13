@@ -2,11 +2,13 @@
 
 import logging
 import sys
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
@@ -22,7 +24,6 @@ from .models import (
     AnalyticsStatsResponse,
     AnalyticsSummaryResponse,
 )
-import time
 
 from .analytics import analytics
 from .llm import router as llm_router
@@ -40,6 +41,7 @@ from .exceptions import (
     validation_exception_handler,
     general_exception_handler,
 )
+from . import metrics as prom_metrics
 
 # Configure structured logging
 logging.basicConfig(
@@ -111,6 +113,7 @@ async def root():
         "status": "running",
         "endpoints": [
             "/health",
+            "/metrics",
             "/v1/chat",
             "/v1/chat/stream/{session_id} (WebSocket)",
             "/v1/memory/search",
@@ -127,6 +130,7 @@ async def health_check():
     services = {
         "memory": settings.MEMORY_BACKEND,
         "llm_providers": llm_router.list_providers(),
+        "prometheus_metrics": True,
     }
     
     return HealthResponse(
@@ -136,8 +140,19 @@ async def health_check():
     )
 
 
+@app.get("/metrics", tags=["monitoring"])
+async def metrics_endpoint():
+    """
+    Prometheus metrics endpoint.
+    
+    Returns metrics in Prometheus exposition format for scraping.
+    Includes HTTP request metrics, chat usage, memory operations, and more.
+    """
+    return prom_metrics.get_metrics_response()
+
+
 @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, http_request: Request):
     """
     Send a chat message and get an AI response.
     
@@ -193,13 +208,19 @@ async def chat(request: ChatRequest):
                 source="chat",
             )
         
-        # Track analytics
+        # Track analytics and Prometheus metrics
         duration_ms = (time.time() - start_time) * 1000
         analytics.track_request("/v1/chat", duration_ms, 200)
         analytics.track_chat(
             provider=result["provider"],
             model=result["model"],
             tokens_used=result.get("tokens_used", 0),
+        )
+        prom_metrics.track_request("POST", "/v1/chat", 200, duration_ms)
+        prom_metrics.track_chat(
+            provider=result["provider"],
+            model=result["model"],
+            tokens=result.get("tokens_used", 0)
         )
         
         return ChatResponse(
@@ -215,6 +236,7 @@ async def chat(request: ChatRequest):
         status_code = 400
         duration_ms = (time.time() - start_time) * 1000
         analytics.track_request("/v1/chat", duration_ms, status_code)
+        prom_metrics.track_request("POST", "/v1/chat", status_code, duration_ms)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -223,6 +245,7 @@ async def chat(request: ChatRequest):
         status_code = 500
         duration_ms = (time.time() - start_time) * 1000
         analytics.track_request("/v1/chat", duration_ms, status_code)
+        prom_metrics.track_request("POST", "/v1/chat", status_code, duration_ms)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat error: {str(e)}",
@@ -241,10 +264,13 @@ async def search_memory(request: MemorySearchRequest):
             filter_metadata=request.filter_metadata,
         )
         
-        # Track analytics
+        # Track analytics and Prometheus metrics
         duration_ms = (time.time() - start_time) * 1000
         analytics.track_request("/v1/memory/search", duration_ms, 200)
         analytics.track_memory_search(len(results), duration_ms)
+        prom_metrics.track_request("POST", "/v1/memory/search", 200, duration_ms)
+        prom_metrics.track_memory_search(duration_ms)
+        prom_metrics.track_memory_operation("search", success=True)
         
         return MemorySearchResponse(
             query=request.query,
@@ -254,6 +280,8 @@ async def search_memory(request: MemorySearchRequest):
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         analytics.track_request("/v1/memory/search", duration_ms, 500)
+        prom_metrics.track_request("POST", "/v1/memory/search", 500, duration_ms)
+        prom_metrics.track_memory_operation("search", success=False)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search error: {str(e)}",
@@ -270,12 +298,15 @@ async def add_memory(entry: MemoryEntry):
             source=entry.source,
         )
         
+        prom_metrics.track_memory_operation("add", success=True)
+        
         return {
             "success": True,
             "memory_id": memory_id,
             "message": "Memory added successfully",
         }
     except Exception as e:
+        prom_metrics.track_memory_operation("add", success=False)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Add error: {str(e)}",
@@ -287,10 +318,12 @@ async def get_memory(memory_id: str):
     """Get a specific memory by ID"""
     result = await memory.get(memory_id)
     if not result:
+        prom_metrics.track_memory_operation("get", success=False)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Memory not found",
         )
+    prom_metrics.track_memory_operation("get", success=True)
     return result
 
 
@@ -299,10 +332,12 @@ async def delete_memory(memory_id: str):
     """Delete a memory by ID"""
     success = await memory.delete(memory_id)
     if not success:
+        prom_metrics.track_memory_operation("delete", success=False)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Memory not found",
         )
+    prom_metrics.track_memory_operation("delete", success=True)
     return {
         "success": True,
         "message": "Memory deleted successfully",
