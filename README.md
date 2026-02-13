@@ -23,6 +23,17 @@ python -m masterclaw_core
 GET /health
 ```
 
+### Security Health Check
+```bash
+GET /health/security
+```
+
+Returns security configuration status:
+- `status`: "secure" or "insecure"
+- `environment`: Current environment (development/production)
+- `issues_count`: Number of security issues detected
+- `recommendations_count`: Number of configuration recommendations
+
 ### Metrics (Prometheus)
 ```bash
 GET /metrics
@@ -98,7 +109,7 @@ masterclaw_core/
 ├── __init__.py        # Package info
 ├── __main__.py        # Entry point
 ├── main.py            # FastAPI app
-├── config.py          # Settings
+├── config.py          # Settings with validation
 ├── models.py          # Pydantic models
 ├── llm.py             # LLM router (OpenAI, Anthropic)
 └── memory.py          # Memory store (Chroma, JSON)
@@ -106,14 +117,37 @@ masterclaw_core/
 
 ## Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENAI_API_KEY` | - | OpenAI API key |
-| `ANTHROPIC_API_KEY` | - | Anthropic API key |
-| `DEFAULT_MODEL` | gpt-4 | Default LLM model |
-| `MEMORY_BACKEND` | chroma | Memory backend (chroma/json) |
-| `CHROMA_PERSIST_DIR` | ./data/chroma | ChromaDB directory |
-| `PORT` | 8000 | API port |
+Configuration is validated on startup with security checks:
+
+| Variable | Default | Description | Validation |
+|----------|---------|-------------|------------|
+| `OPENAI_API_KEY` | - | OpenAI API key | - |
+| `ANTHROPIC_API_KEY` | - | Anthropic API key | - |
+| `DEFAULT_MODEL` | gpt-4 | Default LLM model | - |
+| `MEMORY_BACKEND` | chroma | Memory backend | Must be: chroma, json |
+| `CHROMA_PERSIST_DIR` | ./data/chroma | ChromaDB directory | - |
+| `PORT` | 8000 | API port | 1-65535 |
+| `RATE_LIMIT_PER_MINUTE` | 60 | Rate limit per IP | 1-10000 |
+| `CORS_ORIGINS` | ["*"] | Allowed CORS origins | Valid URLs; warns if "*" in production |
+| `SESSION_TIMEOUT` | 3600 | Session timeout (seconds) | 60-604800 (7 days) |
+| `LOG_LEVEL` | info | Logging level | debug, info, warning, error, critical |
+
+### Security Validation
+
+The configuration system includes security validators:
+
+- **PORT**: Must be a valid port number (1-65535)
+- **RATE_LIMIT_PER_MINUTE**: Must be reasonable (1-10000)
+- **CORS_ORIGINS**: Warns if `*` is used in production; validates URL format
+- **SESSION_TIMEOUT**: Must be between 1 minute and 7 days
+- **LOG_LEVEL**: Must be a standard log level
+- **MEMORY_BACKEND**: Must be a supported backend
+
+On startup in production mode, security issues are logged as warnings.
+
+### Environment Detection
+
+Set `NODE_ENV=production` or `ENV=production` to enable production security checks.
 
 ## Docker
 
@@ -123,6 +157,19 @@ docker build -t masterclaw-core .
 
 # Run
 docker run -p 8000:8000 --env-file .env masterclaw-core
+```
+
+## Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=masterclaw_core
+
+# Run specific test file
+pytest tests/test_config.py -v
 ```
 
 ## Related

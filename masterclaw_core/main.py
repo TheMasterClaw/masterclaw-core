@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
@@ -71,6 +71,22 @@ async def lifespan(app: FastAPI):
     
     # Startup
     logger.info(f"🐾 MasterClaw Core v{__version__} starting...")
+    
+    # Log security configuration report
+    security_report = settings.get_security_report()
+    if security_report["is_production"]:
+        if security_report["secure"]:
+            logger.info("✅ Security configuration check passed")
+        else:
+            logger.warning("⚠️  Security configuration issues detected:")
+            for issue in security_report["issues"]:
+                logger.warning(f"   - {issue}")
+    
+    if security_report["recommendations"]:
+        logger.info("💡 Configuration recommendations:")
+        for rec in security_report["recommendations"]:
+            logger.info(f"   - {rec}")
+    
     memory = get_memory_store()
     logger.info(f"✅ Memory store initialized ({settings.MEMORY_BACKEND})")
     logger.info(f"✅ LLM providers: {llm_router.list_providers()}")
@@ -119,6 +135,7 @@ async def root():
         "status": "running",
         "endpoints": [
             "/health",
+            "/health/security",
             "/metrics",
             "/v1/chat",
             "/v1/chat/stream/{session_id} (WebSocket)",
@@ -149,6 +166,32 @@ async def health_check():
         version=__version__,
         services=services,
     )
+
+
+@app.get("/health/security", tags=["health"])
+async def security_health_check():
+    """
+    Security configuration health check.
+    
+    Returns security status without exposing sensitive values.
+    Use this endpoint to monitor configuration security in production.
+    """
+    report = settings.get_security_report()
+    
+    # Remove any potentially sensitive info
+    safe_report = {
+        "status": "secure" if report["secure"] else "insecure",
+        "environment": report["environment"],
+        "is_production": report["is_production"],
+        "issues_count": len(report["issues"]),
+        "recommendations_count": len(report["recommendations"]),
+        "has_llm_provider": report["has_openai_key"] or report["has_anthropic_key"],
+        "cors_origins_configured": report["cors_origins_count"] > 0,
+        "rate_limit": report["rate_limit"],
+    }
+    
+    status_code = 200 if report["secure"] else 503
+    return JSONResponse(content=safe_report, status_code=status_code)
 
 
 @app.get("/metrics", tags=["monitoring"])
