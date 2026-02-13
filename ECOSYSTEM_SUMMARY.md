@@ -17,6 +17,7 @@
 | **Docker Services** | 10 |
 | **CLI Commands** | 15+ |
 | **API Endpoints** | 20+ |
+| **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
 
 ---
@@ -36,6 +37,7 @@
 - `scripts/backup.sh` - Automated backups
 - `scripts/restore.sh` - Disaster recovery
 - `scripts/health-check.sh` - Service monitoring
+- `scripts/ssl-cert-check.sh` - SSL certificate expiration monitoring
 - `scripts/test.sh` - Test suite runner
 - `scripts/migrate.sh` - Database migrations
 - `monitoring/prometheus.yml` - Metrics collection
@@ -48,6 +50,7 @@
 - ✅ Monitoring with Prometheus + Grafana + **Loki**
 - ✅ Centralized log aggregation with 30-day retention
 - ✅ Automated backups with rotation
+- ✅ **SSL certificate expiration monitoring** (14-day warning, 7-day critical)
 - ✅ CI/CD with GitHub Actions
 - ✅ One-command install/uninstall
 
@@ -117,6 +120,8 @@ mc memory search    # Search memories
 mc task list        # List tasks
 mc task add         # Add task
 mc task done        # Complete task
+mc ssl check        # Check SSL certificate expiration
+mc ssl renew        # Force SSL renewal
 mc export           # Export all data
 ```
 
