@@ -14,7 +14,13 @@ from .models import (
     MemorySearchRequest,
     MemorySearchResponse,
     HealthResponse,
+    AnalyticsStatsRequest,
+    AnalyticsStatsResponse,
+    AnalyticsSummaryResponse,
 )
+import time
+
+from .analytics import analytics
 from .llm import router as llm_router
 from .memory import get_memory_store, MemoryStore
 from .websocket import manager
@@ -72,6 +78,8 @@ async def root():
             "/v1/chat/stream/{session_id} (WebSocket)",
             "/v1/memory/search",
             "/v1/memory/add",
+            "/v1/analytics",
+            "/v1/analytics/stats",
         ],
     }
 
@@ -98,6 +106,9 @@ async def chat(request: ChatRequest):
     
     Retrieves relevant memories if use_memory is True.
     """
+    start_time = time.time()
+    status_code = 200
+    
     try:
         # Retrieve memories if enabled
         memories = []
@@ -145,6 +156,15 @@ async def chat(request: ChatRequest):
                 source="chat",
             )
         
+        # Track analytics
+        duration_ms = (time.time() - start_time) * 1000
+        analytics.track_request("/v1/chat", duration_ms, 200)
+        analytics.track_chat(
+            provider=result["provider"],
+            model=result["model"],
+            tokens_used=result.get("tokens_used", 0),
+        )
+        
         return ChatResponse(
             response=result["response"],
             model=result["model"],
@@ -155,11 +175,17 @@ async def chat(request: ChatRequest):
         )
     
     except ValueError as e:
+        status_code = 400
+        duration_ms = (time.time() - start_time) * 1000
+        analytics.track_request("/v1/chat", duration_ms, status_code)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
     except Exception as e:
+        status_code = 500
+        duration_ms = (time.time() - start_time) * 1000
+        analytics.track_request("/v1/chat", duration_ms, status_code)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat error: {str(e)}",
@@ -169,6 +195,8 @@ async def chat(request: ChatRequest):
 @app.post("/v1/memory/search", response_model=MemorySearchResponse, tags=["memory"])
 async def search_memory(request: MemorySearchRequest):
     """Search for memories using semantic similarity"""
+    start_time = time.time()
+    
     try:
         results = await memory.search(
             query=request.query,
@@ -176,12 +204,19 @@ async def search_memory(request: MemorySearchRequest):
             filter_metadata=request.filter_metadata,
         )
         
+        # Track analytics
+        duration_ms = (time.time() - start_time) * 1000
+        analytics.track_request("/v1/memory/search", duration_ms, 200)
+        analytics.track_memory_search(len(results), duration_ms)
+        
         return MemorySearchResponse(
             query=request.query,
             results=results,
             total_results=len(results),
         )
     except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        analytics.track_request("/v1/memory/search", duration_ms, 500)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search error: {str(e)}",
@@ -235,6 +270,44 @@ async def delete_memory(memory_id: str):
         "success": True,
         "message": "Memory deleted successfully",
     }
+
+
+# =============================================================================
+# Analytics Endpoints
+# =============================================================================
+
+@app.get("/v1/analytics", response_model=AnalyticsSummaryResponse, tags=["analytics"])
+async def analytics_summary():
+    """Get analytics system summary and available endpoints"""
+    return AnalyticsSummaryResponse(
+        status="available",
+        tracked_metrics=["requests", "chats", "memory_searches"],
+        endpoints=[
+            "/v1/analytics/stats",
+        ],
+        retention_days=30,
+    )
+
+
+@app.post("/v1/analytics/stats", response_model=AnalyticsStatsResponse, tags=["analytics"])
+@app.get("/v1/analytics/stats", response_model=AnalyticsStatsResponse, tags=["analytics"])
+async def analytics_stats(days: int = 7):
+    """
+    Get usage analytics and statistics.
+    
+    - **days**: Number of days to look back (1-90, default: 7)
+    
+    Returns aggregated metrics including request counts, response times,
+    chat usage, token consumption, and error rates.
+    """
+    try:
+        stats = analytics.get_stats(days=days)
+        return AnalyticsStatsResponse(**stats)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Analytics error: {str(e)}",
+        )
 
 
 @app.websocket("/v1/chat/stream/{session_id}")

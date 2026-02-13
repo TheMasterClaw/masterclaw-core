@@ -71,3 +71,28 @@ class ToolResponse(BaseModel):
     success: bool = Field(..., description="Whether the tool executed successfully")
     result: Any = Field(None, description="Tool result")
     error: Optional[str] = Field(None, description="Error message if failed")
+
+
+class AnalyticsStatsRequest(BaseModel):
+    """Request model for analytics stats"""
+    days: int = Field(7, ge=1, le=90, description="Number of days to look back")
+
+
+class AnalyticsStatsResponse(BaseModel):
+    """Response model for analytics statistics"""
+    period_days: int = Field(..., description="Period in days")
+    total_requests: int = Field(..., description="Total API requests")
+    avg_response_time_ms: float = Field(..., description="Average response time")
+    total_chats: int = Field(..., description="Total chat interactions")
+    total_tokens: int = Field(..., description="Total tokens used")
+    provider_usage: Dict[str, int] = Field(default_factory=dict, description="Usage by provider")
+    error_rate: float = Field(..., description="Error rate (0-1)")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AnalyticsSummaryResponse(BaseModel):
+    """High-level analytics summary"""
+    status: str = Field("available", description="Analytics status")
+    tracked_metrics: List[str] = Field(default_factory=list, description="Available metrics")
+    endpoints: List[str] = Field(default_factory=list, description="Analytics endpoints")
+    retention_days: int = Field(30, description="Data retention period")
