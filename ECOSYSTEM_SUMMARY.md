@@ -95,7 +95,7 @@
 
 ---
 
-### 3. masterclaw-tools (10 files)
+### 3. masterclaw-tools (11 files)
 **Purpose:** CLI utilities
 
 **Key Files:**
@@ -107,6 +107,9 @@
 - `lib/task.js` - Task management
 - `lib/session.js` - Session management
 - `lib/dashboard.js` - Dashboard browser integration
+- `lib/deploy.js` - Deployment management
+- `lib/health.js` - Health monitoring commands
+- `lib/logs.js` - **NEW: Log viewing, management, and export**
 
 **Commands:**
 ```bash
@@ -116,7 +119,12 @@ mc deploy rolling   # Zero-downtime blue-green deployment
 mc deploy canary 10 # Canary deployment (10% traffic)
 mc deploy rollback  # Rollback to previous version
 mc deploy status    # Show deployment status
-mc logs [service]   # View logs
+mc logs [service]   # View logs (traefik, interface, backend, core, gateway, chroma, watchtower, all)
+mc logs --follow    # Follow logs in real-time
+mc logs status      # Show log sizes and rotation status
+mc logs clean       # Clean up logs to free disk space
+mc logs export      # Export logs for troubleshooting
+mc logs search      # Search for patterns in logs
 mc backup           # Create backup
 mc restore          # Restore from backup
 mc config get/set   # Manage config
