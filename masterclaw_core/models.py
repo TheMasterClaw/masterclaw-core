@@ -133,3 +133,42 @@ class SessionDeleteResponse(BaseModel):
     session_id: str = Field(..., description="Deleted session ID")
     memories_deleted: int = Field(0, description="Number of associated memories deleted")
     message: str = Field(..., description="Status message")
+
+
+class PaginationParams(BaseModel):
+    """
+    Validated pagination parameters for list endpoints.
+    
+    Prevents abuse via excessive limit values or negative offsets.
+    """
+    limit: int = Field(
+        100,
+        ge=1,
+        le=500,
+        description="Maximum number of items to return (1-500)"
+    )
+    offset: int = Field(
+        0,
+        ge=0,
+        description="Pagination offset (must be non-negative)"
+    )
+
+
+class SessionHistoryParams(BaseModel):
+    """
+    Validated parameters for session history endpoint.
+    
+    Enforces reasonable limits to prevent memory exhaustion from
+    retrieving excessive message history.
+    """
+    limit: int = Field(
+        50,
+        ge=1,
+        le=100,
+        description="Maximum messages to return (1-100)"
+    )
+    offset: int = Field(
+        0,
+        ge=0,
+        description="Pagination offset (must be non-negative)"
+    )

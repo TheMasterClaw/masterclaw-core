@@ -2,7 +2,8 @@ import pytest
 from datetime import datetime
 from masterclaw_core.models import (
     ChatRequest, ChatResponse, MemoryEntry, 
-    MemorySearchRequest, MemorySearchResponse, HealthResponse
+    MemorySearchRequest, MemorySearchResponse, HealthResponse,
+    PaginationParams, SessionHistoryParams,
 )
 
 
@@ -143,3 +144,109 @@ class TestModelSerialization:
         json_data = entry.model_dump()
         assert json_data["content"] == "Test"
         assert json_data["metadata"]["key"] == "value"
+
+
+class TestPaginationParams:
+    """Test PaginationParams model validation"""
+    
+    def test_default_values(self):
+        """Test default pagination values"""
+        params = PaginationParams()
+        assert params.limit == 100
+        assert params.offset == 0
+    
+    def test_valid_custom_values(self):
+        """Test valid custom pagination values"""
+        params = PaginationParams(limit=50, offset=25)
+        assert params.limit == 50
+        assert params.offset == 25
+    
+    def test_limit_minimum(self):
+        """Test limit must be at least 1"""
+        with pytest.raises(ValueError):
+            PaginationParams(limit=0)
+        with pytest.raises(ValueError):
+            PaginationParams(limit=-1)
+    
+    def test_limit_maximum(self):
+        """Test limit cannot exceed 500 (DoS protection)"""
+        with pytest.raises(ValueError):
+            PaginationParams(limit=501)
+        with pytest.raises(ValueError):
+            PaginationParams(limit=1000)
+    
+    def test_valid_limit_boundary(self):
+        """Test valid limit at boundaries"""
+        params_min = PaginationParams(limit=1)
+        assert params_min.limit == 1
+        
+        params_max = PaginationParams(limit=500)
+        assert params_max.limit == 500
+    
+    def test_offset_minimum(self):
+        """Test offset cannot be negative"""
+        with pytest.raises(ValueError):
+            PaginationParams(offset=-1)
+        with pytest.raises(ValueError):
+            PaginationParams(offset=-100)
+    
+    def test_valid_offset_boundary(self):
+        """Test valid offset at boundary"""
+        params = PaginationParams(offset=0)
+        assert params.offset == 0
+    
+    def test_large_offset(self):
+        """Test large offset values are allowed"""
+        params = PaginationParams(offset=10000)
+        assert params.offset == 10000
+
+
+class TestSessionHistoryParams:
+    """Test SessionHistoryParams model validation"""
+    
+    def test_default_values(self):
+        """Test default session history params"""
+        params = SessionHistoryParams()
+        assert params.limit == 50
+        assert params.offset == 0
+    
+    def test_valid_custom_values(self):
+        """Test valid custom values"""
+        params = SessionHistoryParams(limit=25, offset=10)
+        assert params.limit == 25
+        assert params.offset == 10
+    
+    def test_limit_minimum(self):
+        """Test limit must be at least 1"""
+        with pytest.raises(ValueError):
+            SessionHistoryParams(limit=0)
+    
+    def test_limit_maximum(self):
+        """Test limit cannot exceed 100 (memory protection)"""
+        with pytest.raises(ValueError):
+            SessionHistoryParams(limit=101)
+        with pytest.raises(ValueError):
+            SessionHistoryParams(limit=500)
+    
+    def test_valid_limit_boundary(self):
+        """Test valid limit at boundaries"""
+        params_min = SessionHistoryParams(limit=1)
+        assert params_min.limit == 1
+        
+        params_max = SessionHistoryParams(limit=100)
+        assert params_max.limit == 100
+    
+    def test_offset_minimum(self):
+        """Test offset cannot be negative"""
+        with pytest.raises(ValueError):
+            SessionHistoryParams(offset=-1)
+    
+    def test_pagination_params_stricter_than_session_list(self):
+        """Verify session history has stricter limits than session list"""
+        # Session list allows up to 500
+        list_params = PaginationParams(limit=500)
+        assert list_params.limit == 500
+        
+        # Session history only allows up to 100
+        with pytest.raises(ValueError):
+            SessionHistoryParams(limit=500)

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response, JSONResponse
@@ -29,6 +29,8 @@ from .models import (
     SessionInfo,
     SessionHistoryResponse,
     SessionDeleteResponse,
+    PaginationParams,
+    SessionHistoryParams,
 )
 
 from .analytics import analytics
@@ -404,8 +406,7 @@ async def delete_memory(memory_id: str):
 
 @app.get("/v1/sessions", response_model=SessionListResponse, tags=["sessions"])
 async def list_sessions(
-    limit: int = 100,
-    offset: int = 0,
+    params: PaginationParams = Depends(),
     active_since_hours: Optional[int] = None
 ):
     """
@@ -421,7 +422,7 @@ async def list_sessions(
         # Search for all chat interaction memories to extract sessions
         all_memories = await memory.search(
             query="chat_interaction",
-            top_k=limit + offset,
+            top_k=params.limit + params.offset,
             filter_metadata={"type": "chat_interaction"}
         )
         
@@ -477,7 +478,7 @@ async def list_sessions(
         
         # Apply pagination
         total = len(sorted_sessions)
-        paginated = sorted_sessions[offset:offset + limit]
+        paginated = sorted_sessions[params.offset:params.offset + params.limit]
         
         # Convert to SessionInfo objects
         sessions = [
@@ -496,8 +497,8 @@ async def list_sessions(
         return SessionListResponse(
             sessions=sessions,
             total=total,
-            limit=limit,
-            offset=offset
+            limit=params.limit,
+            offset=params.offset
         )
     
     except Exception as e:
@@ -511,8 +512,7 @@ async def list_sessions(
 @app.get("/v1/sessions/{session_id}", response_model=SessionHistoryResponse, tags=["sessions"])
 async def get_session_history(
     session_id: str,
-    limit: int = 50,
-    offset: int = 0
+    params: SessionHistoryParams = Depends()
 ):
     """
     Get detailed chat history for a specific session.
@@ -551,7 +551,7 @@ async def get_session_history(
         
         # Apply pagination
         total = len(all_memories)
-        paginated = all_memories[offset:offset + limit]
+        paginated = all_memories[params.offset:params.offset + params.limit]
         
         prom_metrics.track_request("GET", "/v1/sessions/{id}", 200, 0)
         
