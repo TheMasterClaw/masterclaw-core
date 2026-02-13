@@ -115,7 +115,13 @@ app.add_exception_handler(Exception, general_exception_handler)
 
 # Add security and logging middleware (order matters - last added = first executed)
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RateLimitMiddleware, requests_per_minute=settings.RATE_LIMIT_PER_MINUTE)
+app.add_middleware(
+    RateLimitMiddleware,
+    requests_per_minute=settings.RATE_LIMIT_PER_MINUTE,
+    window_seconds=60,
+    max_ips_tracked=10000,
+    cleanup_interval=1000
+)
 app.add_middleware(RequestLoggingMiddleware)
 
 # CORS middleware

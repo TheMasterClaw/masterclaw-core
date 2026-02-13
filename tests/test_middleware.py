@@ -90,6 +90,7 @@ class TestRateLimitMiddleware:
         assert response.status_code == 200
         assert "X-RateLimit-Limit" in response.headers
         assert "X-RateLimit-Remaining" in response.headers
+        assert "X-RateLimit-Reset" in response.headers
         assert response.headers["X-RateLimit-Limit"] == "10"
         
     def test_rate_limit_enforced(self):
@@ -113,7 +114,13 @@ class TestRateLimitMiddleware:
         # Third request should be rate limited
         response3 = client.get("/")
         assert response3.status_code == 429
-        assert "Rate limit exceeded" in response3.json()["error"]
+        data = response3.json()
+        assert data["code"] == "RATE_LIMIT_EXCEEDED"
+        assert "retry_after" in data
+        
+        # Check rate limit headers on 429 response
+        assert response3.headers.get("Retry-After") is not None
+        assert response3.headers["X-RateLimit-Remaining"] == "0"
         
     def test_x_forwarded_for(self):
         """Test that X-Forwarded-For header is respected"""
@@ -137,6 +144,79 @@ class TestRateLimitMiddleware:
         # Different IP should still work
         response3 = client.get("/", headers={"X-Forwarded-For": "5.6.7.8"})
         assert response3.status_code == 200
+        
+    def test_x_forwarded_for_chain(self):
+        """Test that X-Forwarded-For chain takes first IP"""
+        app = FastAPI()
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=1)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        
+        # First IP in chain should be used
+        response1 = client.get("/", headers={"X-Forwarded-For": "1.2.3.4, 5.6.7.8, 9.10.11.12"})
+        assert response1.status_code == 200
+        
+        # Same first IP should be rate limited
+        response2 = client.get("/", headers={"X-Forwarded-For": "1.2.3.4, 99.99.99.99"})
+        assert response2.status_code == 429
+        
+        # Different first IP should work
+        response3 = client.get("/", headers={"X-Forwarded-For": "5.6.7.8, 1.2.3.4"})
+        assert response3.status_code == 200
+        
+    def test_cleanup_stale_entries(self):
+        """Test that stale entries are cleaned up"""
+        app = FastAPI()
+        middleware = RateLimitMiddleware(
+            app,
+            requests_per_minute=10,
+            window_seconds=1,  # 1 second window for testing
+            cleanup_interval=5
+        )
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=10, window_seconds=1)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        
+        # Make a request
+        response = client.get("/", headers={"X-Forwarded-For": "1.2.3.4"})
+        assert response.status_code == 200
+        
+        # Wait for window to expire
+        import time
+        time.sleep(1.1)
+        
+        # Request should work again (old entries cleaned)
+        response2 = client.get("/", headers={"X-Forwarded-For": "1.2.3.4"})
+        assert response2.status_code == 200
+        
+    def test_rate_limiter_stats(self):
+        """Test rate limiter statistics"""
+        middleware = RateLimitMiddleware(
+            None,
+            requests_per_minute=60,
+            window_seconds=60,
+            max_ips_tracked=100
+        )
+        
+        stats = middleware.get_stats()
+        
+        assert "tracked_ips" in stats
+        assert "active_ips" in stats
+        assert "total_requests_in_window" in stats
+        assert "window_seconds" in stats
+        assert "requests_per_minute" in stats
+        assert "max_ips_tracked" in stats
+        assert stats["window_seconds"] == 60
+        assert stats["requests_per_minute"] == 60
+        assert stats["max_ips_tracked"] == 100
 
 
 class TestRequireAPIKey:

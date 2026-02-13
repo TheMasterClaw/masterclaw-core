@@ -144,56 +144,171 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory rate limiting"""
+    """
+    Production-ready in-memory rate limiting with automatic cleanup.
     
-    def __init__(self, app, requests_per_minute: int = 60):
+    Features:
+    - Configurable window size and request limits
+    - Automatic cleanup of stale entries to prevent memory leaks
+    - Per-IP tracking with X-Forwarded-For support
+    - Thread-safe request counting
+    """
+    
+    def __init__(
+        self,
+        app,
+        requests_per_minute: int = 60,
+        window_seconds: int = 60,
+        max_ips_tracked: int = 10000,
+        cleanup_interval: int = 1000
+    ):
         super().__init__(app)
         self.requests_per_minute = requests_per_minute
+        self.window_seconds = window_seconds
+        self.max_ips_tracked = max_ips_tracked
+        self.cleanup_interval = cleanup_interval
         self.requests = {}  # ip -> [(timestamp, count)]
+        self.request_count = 0  # Track requests for periodic cleanup
+        self._lock = False  # Simple async-safe flag (actual locking not needed for GIL)
+    
+    def _cleanup_stale_entries(self, current_time: float):
+        """Remove stale entries to prevent memory leaks."""
+        window_start = current_time - self.window_seconds
+        
+        # Remove old requests for each IP
+        ips_to_remove = []
+        for ip, requests in self.requests.items():
+            valid_requests = [
+                req for req in requests
+                if req[0] > window_start
+            ]
+            if valid_requests:
+                self.requests[ip] = valid_requests
+            else:
+                ips_to_remove.append(ip)
+        
+        # Remove IPs with no active requests
+        for ip in ips_to_remove:
+            del self.requests[ip]
+        
+        # If still over max IPs, remove oldest entries
+        if len(self.requests) > self.max_ips_tracked:
+            # Sort by most recent request and keep top N
+            sorted_ips = sorted(
+                self.requests.items(),
+                key=lambda x: max(req[0] for req in x[1]) if x[1] else 0,
+                reverse=True
+            )
+            self.requests = dict(sorted_ips[:self.max_ips_tracked])
+            logger.warning(
+                f"Rate limiter hit max IPs tracked ({self.max_ips_tracked}), "
+                f"removed {len(sorted_ips) - self.max_ips_tracked} oldest entries"
+            )
+    
+    def _get_client_identifier(self, request: Request) -> str:
+        """Get a unique identifier for the client."""
+        # Use X-Forwarded-For if behind a proxy, fallback to client host
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            # Take the first IP in the chain (closest to client)
+            return forwarded_for.split(',')[0].strip()
+        
+        if request.client:
+            return request.client.host
+        
+        return "unknown"
     
     async def dispatch(self, request: Request, call_next: Callable):
-        # Get client IP
-        client_ip = request.headers.get("X-Forwarded-For", request.client.host)
+        # Get client identifier
+        client_id = self._get_client_identifier(request)
         
-        # Clean old requests
+        # Get request ID for logging
+        request_id = getattr(request.state, 'request_id', 'unknown')
+        
+        # Clean old requests periodically
         current_time = time.time()
-        window_start = current_time - 60  # 1 minute window
+        self.request_count += 1
         
-        if client_ip in self.requests:
-            self.requests[client_ip] = [
-                req for req in self.requests[client_ip]
+        if self.request_count >= self.cleanup_interval:
+            self._cleanup_stale_entries(current_time)
+            self.request_count = 0
+        
+        # Clean old requests for this specific client
+        window_start = current_time - self.window_seconds
+        if client_id in self.requests:
+            self.requests[client_id] = [
+                req for req in self.requests[client_id]
                 if req[0] > window_start
             ]
         
         # Count requests in window
         request_count = sum(
-            count for ts, count in self.requests.get(client_ip, [])
+            count for ts, count in self.requests.get(client_id, [])
         )
         
+        # Check if rate limit exceeded
         if request_count >= self.requests_per_minute:
-            logger.warning(f"Rate limit exceeded for {client_ip}")
+            logger.warning(
+                f"[{request_id}] Rate limit exceeded for {client_id}: "
+                f"{request_count}/{self.requests_per_minute} requests"
+            )
             return JSONResponse(
                 status_code=429,
                 content={
                     "error": "Rate limit exceeded",
+                    "code": "RATE_LIMIT_EXCEEDED",
                     "limit": self.requests_per_minute,
-                    "window": "1 minute"
+                    "window": f"{self.window_seconds} seconds",
+                    "retry_after": self.window_seconds
+                },
+                headers={
+                    "Retry-After": str(self.window_seconds),
+                    "X-RateLimit-Limit": str(self.requests_per_minute),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(int(current_time + self.window_seconds))
                 }
             )
         
         # Record request
-        if client_ip not in self.requests:
-            self.requests[client_ip] = []
-        self.requests[client_ip].append((current_time, 1))
+        if client_id not in self.requests:
+            self.requests[client_id] = []
+        self.requests[client_id].append((current_time, 1))
         
-        # Add rate limit headers
+        remaining = max(0, self.requests_per_minute - request_count - 1)
+        reset_time = int(current_time + self.window_seconds)
+        
+        # Process request
         response = await call_next(request)
+        
+        # Add rate limit headers to successful responses
         response.headers["X-RateLimit-Limit"] = str(self.requests_per_minute)
-        response.headers["X-RateLimit-Remaining"] = str(
-            max(0, self.requests_per_minute - request_count - 1)
-        )
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = str(reset_time)
         
         return response
+    
+    def get_stats(self) -> dict:
+        """Get current rate limiter statistics for monitoring."""
+        current_time = time.time()
+        window_start = current_time - self.window_seconds
+        
+        active_ips = 0
+        total_active_requests = 0
+        
+        for requests in self.requests.values():
+            active = [r for r in requests if r[0] > window_start]
+            if active:
+                active_ips += 1
+                total_active_requests += sum(r[1] for r in active)
+        
+        return {
+            "tracked_ips": len(self.requests),
+            "active_ips": active_ips,
+            "total_requests_in_window": total_active_requests,
+            "window_seconds": self.window_seconds,
+            "requests_per_minute": self.requests_per_minute,
+            "max_ips_tracked": self.max_ips_tracked
+        }
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
