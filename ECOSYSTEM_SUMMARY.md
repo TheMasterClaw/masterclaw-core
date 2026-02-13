@@ -92,7 +92,7 @@
 
 ---
 
-### 3. masterclaw-tools (9 files)
+### 3. masterclaw-tools (10 files)
 **Purpose:** CLI utilities
 
 **Key Files:**
@@ -103,6 +103,7 @@
 - `lib/memory.js` - Memory commands
 - `lib/task.js` - Task management
 - `lib/session.js` - Session management
+- `lib/dashboard.js` - Dashboard browser integration
 
 **Commands:**
 ```bash
@@ -129,6 +130,10 @@ mc session stats    # Session statistics
 mc session cleanup  # Cleanup old sessions
 mc ssl check        # Check SSL certificate expiration
 mc ssl renew        # Force SSL renewal
+mc dashboard        # List monitoring dashboards
+mc dashboard --all  # Open all dashboards
+mc dashboard open grafana    # Open Grafana
+mc dashboard open prometheus # Open Prometheus
 mc export           # Export all data
 ```
 
