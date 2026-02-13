@@ -84,6 +84,7 @@
 - ✅ WebSocket for real-time chat
 - ✅ LLM routing (OpenAI, Anthropic)
 - ✅ Vector memory with semantic search
+- ✅ **Session management** (list, view, delete sessions)
 - ✅ Rate limiting (60 req/min)
 - ✅ Request logging
 - ✅ Security headers
@@ -101,6 +102,7 @@
 - `lib/docker.js` - Docker helpers
 - `lib/memory.js` - Memory commands
 - `lib/task.js` - Task management
+- `lib/session.js` - Session management
 
 **Commands:**
 ```bash
@@ -120,6 +122,11 @@ mc memory search    # Search memories
 mc task list        # List tasks
 mc task add         # Add task
 mc task done        # Complete task
+mc session list     # List chat sessions  
+mc session show     # View session history
+mc session delete   # Delete session
+mc session stats    # Session statistics
+mc session cleanup  # Cleanup old sessions
 mc ssl check        # Check SSL certificate expiration
 mc ssl renew        # Force SSL renewal
 mc export           # Export all data
