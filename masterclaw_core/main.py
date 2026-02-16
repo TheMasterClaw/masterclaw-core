@@ -50,6 +50,7 @@ from .exceptions import (
     general_exception_handler,
 )
 from . import metrics as prom_metrics
+from .security import validate_session_id
 
 # Configure structured logging
 logging.basicConfig(
@@ -529,13 +530,22 @@ async def get_session_history(
     
     Returns all messages in the session with timestamps.
     """
+    # Validate session ID format (security hardening)
+    try:
+        validated_session_id = validate_session_id(session_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    
     try:
         # Search for memories with this session_id
         all_memories = await memory.search(
             query="",
             top_k=1000,  # Get all to filter and sort
             filter_metadata={
-                "session_id": session_id,
+                "session_id": validated_session_id,
                 "type": "chat_interaction"
             }
         )
@@ -544,7 +554,7 @@ async def get_session_history(
             prom_metrics.track_request("GET", "/v1/sessions/{id}", 404, 0)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session '{session_id}' not found or has no messages"
+                detail=f"Session '{validated_session_id}' not found or has no messages"
             )
         
         # Sort by timestamp (oldest first for conversation flow)
@@ -562,7 +572,7 @@ async def get_session_history(
         prom_metrics.track_request("GET", "/v1/sessions/{id}", 200, 0)
         
         return SessionHistoryResponse(
-            session_id=session_id,
+            session_id=validated_session_id,
             messages=paginated,
             total_messages=total,
             session_duration_minutes=duration_minutes if total > 1 else None
@@ -587,12 +597,21 @@ async def delete_session(session_id: str):
     
     Returns the number of memories deleted.
     """
+    # Validate session ID format (security hardening)
+    try:
+        validated_session_id = validate_session_id(session_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    
     try:
         # Find all memories for this session
         all_memories = await memory.search(
             query="",
             top_k=1000,
-            filter_metadata={"session_id": session_id}
+            filter_metadata={"session_id": validated_session_id}
         )
         
         deleted_count = 0
@@ -604,9 +623,9 @@ async def delete_session(session_id: str):
         
         return SessionDeleteResponse(
             success=True,
-            session_id=session_id,
+            session_id=validated_session_id,
             memories_deleted=deleted_count,
-            message=f"Session '{session_id}' deleted with {deleted_count} associated memories"
+            message=f"Session '{validated_session_id}' deleted with {deleted_count} associated memories"
         )
     
     except Exception as e:
