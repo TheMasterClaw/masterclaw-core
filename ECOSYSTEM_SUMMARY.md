@@ -113,6 +113,7 @@
 
 **Commands:**
 ```bash
+mc validate         # Pre-flight environment validation
 mc status           # Check health
 mc status --watch   # Continuous monitoring
 mc deploy rolling   # Zero-downtime blue-green deployment
