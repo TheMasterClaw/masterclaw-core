@@ -109,7 +109,7 @@
 - `lib/dashboard.js` - Dashboard browser integration
 - `lib/deploy.js` - Deployment management
 - `lib/health.js` - Health monitoring commands
-- `lib/logs.js` - **NEW: Log viewing, management, and export**
+- `lib/logs.js` - **Log viewing, management, export, and Loki integration**
 - `lib/restore.js` - **NEW: Disaster recovery and backup restoration**
 
 **Commands:**
@@ -127,6 +127,8 @@ mc logs status      # Show log sizes and rotation status
 mc logs clean       # Clean up logs to free disk space
 mc logs export      # Export logs for troubleshooting
 mc logs search      # Search for patterns in logs
+mc logs query       # Query logs via Loki aggregation (requires monitoring stack)
+mc logs query --errors --since 24h  # Error logs from last 24h
 mc backup           # Create backup
 mc restore          # List backups for restore
 mc restore list     # List available backups
