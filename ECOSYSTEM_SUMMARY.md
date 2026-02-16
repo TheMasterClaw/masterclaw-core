@@ -95,7 +95,7 @@
 
 ---
 
-### 3. masterclaw-tools (11 files)
+### 3. masterclaw-tools (12 files + completion.js)
 **Purpose:** CLI utilities
 
 **Key Files:**
@@ -110,6 +110,7 @@
 - `lib/deploy.js` - Deployment management
 - `lib/health.js` - Health monitoring commands
 - `lib/logs.js` - **NEW: Log viewing, management, and export**
+- `lib/restore.js` - **NEW: Disaster recovery and backup restoration**
 
 **Commands:**
 ```bash
@@ -127,6 +128,10 @@ mc logs clean       # Clean up logs to free disk space
 mc logs export      # Export logs for troubleshooting
 mc logs search      # Search for patterns in logs
 mc backup           # Create backup
+mc restore          # List backups for restore
+mc restore list     # List available backups
+mc restore preview  # Preview backup contents
+mc restore run      # Interactive restore
 mc restore          # Restore from backup
 mc config get/set   # Manage config
 mc revive           # Restart services

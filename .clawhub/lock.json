@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "skills": {
+    "SuperMemory": {
+      "version": "1.0.0",
+      "installedAt": 1771227664250
+    },
+    "QMD": {
+      "version": "1.0.0",
+      "installedAt": 1771227808782
+    },
+    "prompt-guard": {
+      "version": "3.1.0",
+      "installedAt": 1771227991623
+    },
+    "agent-browser": {
+      "version": "0.2.0",
+      "installedAt": 1771228052875
+    }
+  }
+}
