@@ -325,13 +325,16 @@ class TestSecurityReport:
             assert any("CORS_ORIGINS" in issue for issue in report["issues"])
     
     def test_security_report_missing_api_keys(self):
-        """Test report flags missing API keys"""
+        """Test report flags missing API keys as config issues (not security issues)"""
         settings = Settings(OPENAI_API_KEY=None, ANTHROPIC_API_KEY=None)
         report = settings.get_security_report()
         
-        assert any("API keys" in issue for issue in report["issues"])
+        # API key issues are now config_issues, not security issues
+        assert any("API keys" in issue for issue in report["config_issues"])
         assert report["has_openai_key"] is False
         assert report["has_anthropic_key"] is False
+        # Missing API keys shouldn't make the config "insecure" - they're functionality issues
+        assert "secure" in report
     
     def test_security_report_high_rate_limit(self):
         """Test report recommends against very high rate limit"""
@@ -353,6 +356,20 @@ class TestSecurityReport:
         report = settings.get_security_report()
         
         assert any("24 hours" in rec for rec in report["recommendations"])
+    
+    def test_security_report_config_issues_separate_from_security(self):
+        """Test that config_issues don't affect 'secure' flag"""
+        settings = Settings(
+            OPENAI_API_KEY=None,
+            ANTHROPIC_API_KEY=None,
+            CORS_ORIGINS=["https://example.com"]
+        )
+        report = settings.get_security_report()
+        
+        # Should have config issues but still be "secure"
+        assert len(report["config_issues"]) > 0
+        assert report["secure"] is True
+        assert len(report["issues"]) == 0
 
 
 class TestMultipleValidationErrors:

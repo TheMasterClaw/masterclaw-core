@@ -115,38 +115,63 @@ class Settings(BaseSettings):
         return v_lower
     
     def get_security_report(self) -> dict[str, Any]:
-        """Generate a security configuration report"""
+        """
+        Generate a security configuration report.
+        
+        Distinguishes between security issues (vulnerabilities) and 
+        configuration issues (functionality problems).
+        
+        Returns:
+            Dict containing:
+            - environment: Current environment name
+            - is_production: Whether running in production
+            - secure: True if no security vulnerabilities detected
+            - issues: Security vulnerability issues
+            - config_issues: Non-security configuration problems
+            - recommendations: Security improvement suggestions
+        """
         env = os.getenv("NODE_ENV", os.getenv("ENV", "development")).lower()
         is_production = env in ("production", "prod")
         
-        issues = []
-        recommendations = []
+        issues = []  # Security vulnerabilities
+        config_issues = []  # Configuration/functionality problems
+        recommendations = []  # Security improvement suggestions
         
-        # Check CORS
+        # Check CORS - This IS a security issue in production
         if "*" in self.CORS_ORIGINS:
             if is_production:
                 issues.append("CORS_ORIGINS allows all origins (*) in production")
             recommendations.append("Set specific CORS origins instead of '*' for better security")
         
-        # Check API keys
+        # Check API keys - This is a config issue, NOT a security issue
+        # Missing keys don't create vulnerabilities, they just break functionality
         if not self.OPENAI_API_KEY and not self.ANTHROPIC_API_KEY:
-            issues.append("No LLM API keys configured - chat functionality will fail")
+            config_issues.append("No LLM API keys configured - chat functionality will fail")
         
-        # Check rate limiting
+        # Check rate limiting - Only flag as security issue if extremely permissive
+        # Note: Values >10000 are rejected by validator, so we only check validated values
         if self.RATE_LIMIT_PER_MINUTE > 1000:
             recommendations.append("RATE_LIMIT_PER_MINUTE is very high (>1000), consider lowering")
         elif self.RATE_LIMIT_PER_MINUTE < 10:
             recommendations.append("RATE_LIMIT_PER_MINUTE is very low (<10), may impact usability")
         
-        # Check session timeout
+        # Check session timeout - Flag if excessively long (security risk)
+        # Note: Values >7 days are rejected by validator
         if self.SESSION_TIMEOUT > 86400:  # 24 hours
             recommendations.append("SESSION_TIMEOUT exceeds 24 hours, consider shorter sessions")
+        
+        # Production-specific security checks
+        if is_production:
+            # Check for default/weak settings that are risky in production
+            if self.RATE_LIMIT_PER_MINUTE > 1000:
+                issues.append(f"RATE_LIMIT_PER_MINUTE ({self.RATE_LIMIT_PER_MINUTE}) is too high for production")
         
         return {
             "environment": env,
             "is_production": is_production,
             "secure": len(issues) == 0,
             "issues": issues,
+            "config_issues": config_issues,
             "recommendations": recommendations,
             "cors_origins_count": len(self.CORS_ORIGINS),
             "rate_limit": self.RATE_LIMIT_PER_MINUTE,

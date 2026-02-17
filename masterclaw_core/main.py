@@ -111,6 +111,12 @@ async def lifespan(app: FastAPI):
             for issue in security_report["issues"]:
                 logger.warning(f"   - {issue}")
     
+    # Log config issues (in any environment)
+    if security_report.get("config_issues"):
+        logger.warning("⚠️  Configuration issues detected:")
+        for issue in security_report["config_issues"]:
+            logger.warning(f"   - {issue}")
+    
     if security_report["recommendations"]:
         logger.info("💡 Configuration recommendations:")
         for rec in security_report["recommendations"]:
@@ -286,6 +292,7 @@ async def security_health_check():
         "environment": report["environment"],
         "is_production": report["is_production"],
         "issues_count": len(report["issues"]),
+        "config_issues_count": len(report.get("config_issues", [])),
         "recommendations_count": len(report["recommendations"]),
         "has_llm_provider": report["has_openai_key"] or report["has_anthropic_key"],
         "cors_origins_configured": report["cors_origins_count"] > 0,
