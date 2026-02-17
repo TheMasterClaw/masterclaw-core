@@ -316,7 +316,7 @@ class PaginationParams(BaseModel):
 class SessionHistoryParams(BaseModel):
     """
     Validated parameters for session history endpoint.
-    
+
     Enforces reasonable limits to prevent memory exhaustion from
     retrieving excessive message history.
     """
@@ -331,3 +331,48 @@ class SessionHistoryParams(BaseModel):
         ge=0,
         description="Pagination offset (must be non-negative)"
     )
+
+
+# =============================================================================
+# System Info Models
+# =============================================================================
+
+class ComponentHealth(BaseModel):
+    """Health status of a system component"""
+    name: str = Field(..., description="Component name")
+    status: Literal["healthy", "degraded", "unhealthy", "unknown"] = Field(..., description="Health status")
+    version: Optional[str] = Field(None, description="Component version if available")
+    details: Optional[str] = Field(None, description="Additional details")
+    response_time_ms: Optional[float] = Field(None, description="Response time in milliseconds")
+
+
+class FeatureAvailability(BaseModel):
+    """Availability of a feature"""
+    name: str = Field(..., description="Feature name")
+    available: bool = Field(..., description="Whether the feature is available")
+    description: Optional[str] = Field(None, description="Feature description")
+
+
+class SystemInfoResponse(BaseModel):
+    """Comprehensive system information response"""
+    name: str = Field(default="MasterClaw Core", description="Service name")
+    version: str = Field(..., description="API version")
+    environment: str = Field(..., description="Deployment environment")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    uptime_seconds: Optional[int] = Field(None, description="Service uptime in seconds")
+
+    # Component health
+    components: List[ComponentHealth] = Field(default_factory=list, description="Health of system components")
+    overall_health: Literal["healthy", "degraded", "unhealthy"] = Field(..., description="Overall system health")
+
+    # Features
+    features: List[FeatureAvailability] = Field(default_factory=list, description="Available features")
+
+    # Resources
+    memory_backend: str = Field(..., description="Memory backend type")
+    llm_providers: List[str] = Field(default_factory=list, description="Available LLM providers")
+    active_sessions: int = Field(0, description="Number of active sessions")
+
+    # API Info
+    api_documentation: Dict[str, str] = Field(default_factory=dict, description="API documentation URLs")
+    rate_limit: Dict[str, Any] = Field(default_factory=dict, description="Rate limit configuration")
