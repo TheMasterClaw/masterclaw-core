@@ -5,6 +5,24 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Config Command Module (`mc config`)** - Complete configuration management for CLI
+  - `mc config list` — Display all configuration values with security masking
+  - `mc config get <key>` — Retrieve specific values using dot notation
+  - `mc config set <key> <value>` — Update configuration with type inference
+  - `mc config export [file]` — Export config to JSON with sensitive value masking
+  - `mc config import <file>` — Import config with diff preview and dry-run support
+  - `mc config reset` — Reset to defaults with confirmation protection
+  - Security features: rate limiting, sensitive value masking, prototype pollution protection
+- **Unified Maintenance Command (`mc maintenance`)** - Comprehensive system maintenance workflow
+  - Health checks for Core API, disk space, and session statistics
+  - Automated session cleanup with configurable retention periods
+  - Backup verification with freshness checking
+  - Docker system pruning for images, containers, and volumes
+  - Optional log cleanup for container logs
+  - Report generation for audit trails (`--report` flag)
+  - Scheduling helper with cron examples (`mc maintenance schedule`)
+  - Quick status check (`mc maintenance status`)
+  - Non-interactive mode for automation (`--force` flag)
 - **Interactive API Documentation** - Auto-generated docs with Swagger UI and ReDoc
   - Swagger UI at `/docs` - Interactive API explorer with "Try it out" feature
   - ReDoc at `/redoc` - Clean, responsive API reference documentation  
@@ -25,6 +43,10 @@ All notable changes to MasterClaw Core will be documented in this file.
   - Comprehensive error handling with typed error codes
   - Automatic conversation storage to memory
   - Bidirectional JSON message protocol
+
+### Fixed
+- Fixed syntax error in doctor.js (quote escaping in awk command)
+- Fixed missing command name in notify.js causing addCommand error
 
 ### Changed
 - Updated root endpoint (`/`) to include new WebSocket and Analytics endpoints
