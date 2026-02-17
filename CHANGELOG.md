@@ -5,6 +5,18 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Event Tracking System (`mc events`)** - Centralized event tracking and notification history
+  - `mc events list` — List events with filtering by type, severity, source, and time
+  - `mc events show <id>` — Display detailed event information
+  - `mc events ack <id>` — Acknowledge individual events
+  - `mc events ack-all` — Bulk acknowledge events
+  - `mc events stats` — Event statistics and summaries
+  - `mc events add <title>` — Add custom events
+  - `mc events export` — Export events to JSON or CSV
+  - `mc events watch` — Real-time event monitoring
+  - Event types: backup, deploy, alert, error, warning, info, security, maintenance, restore, update
+  - Severity levels: critical, high, medium, low, info
+  - Automatic event creation from other commands (backup, deploy, restore)
 - **Error Handler JSON Output Mode** - Structured JSON error output for production/CI environments
   - Set `MC_JSON_OUTPUT=1` to enable machine-readable error output
   - Structured JSON schema with timestamp, category, exit code, message, and error details
