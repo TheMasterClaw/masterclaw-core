@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .audit_logger import audit_logger, SecuritySeverity
+from .security_response import auto_responder
 
 
 # Configure logging
@@ -388,6 +389,66 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Strict-Transport-Security"] = self._build_hsts_header()
         
         return response
+
+
+class IPBlockMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to block requests from banned IP addresses.
+    
+    Checks the security auto-responder's blocklist and rejects requests
+    from blocked IPs with a 403 Forbidden response.
+    
+    This should be placed early in the middleware stack to prevent
+    blocked IPs from consuming resources.
+    """
+    
+    async def dispatch(self, request: Request, call_next: Callable):
+        # Get client IP
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            client_ip = forwarded_for.split(',')[0].strip()
+        elif request.client:
+            client_ip = request.client.host
+        else:
+            client_ip = "unknown"
+        
+        # Check if IP is blocked
+        if auto_responder.is_ip_blocked(client_ip):
+            block_info = auto_responder.get_block_info(client_ip)
+            
+            # Log the blocked request
+            audit_logger.suspicious_activity(
+                message=f"Request blocked from banned IP: {client_ip}",
+                severity=SecuritySeverity.MEDIUM,
+                client_ip=client_ip,
+                resource=request.url.path,
+                details={
+                    "block_reason": block_info.reason.value if block_info else "unknown",
+                    "user_agent": request.headers.get("User-Agent"),
+                }
+            )
+            
+            # Calculate retry-after if block expires
+            headers = {}
+            if block_info and block_info.expires_at:
+                retry_after = int(
+                    (block_info.expires_at - __import__('datetime').datetime.utcnow()).total_seconds()
+                )
+                if retry_after > 0:
+                    headers["Retry-After"] = str(retry_after)
+            
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "Access denied",
+                    "code": "IP_BLOCKED",
+                    "message": "This IP address has been temporarily blocked due to suspicious activity."
+                },
+                headers=headers
+            )
+        
+        # IP not blocked, continue with request
+        return await call_next(request)
 
 
 def require_api_key(func: Callable) -> Callable:

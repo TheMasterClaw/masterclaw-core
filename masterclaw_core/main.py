@@ -50,6 +50,7 @@ from .middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
+    IPBlockMiddleware,
 )
 from .exceptions import (
     MasterClawException,
@@ -63,6 +64,11 @@ from .exceptions import (
 )
 from . import metrics as prom_metrics
 from .security import validate_session_id
+from .security_response import (
+    auto_responder,
+    initialize_auto_responder,
+    shutdown_auto_responder,
+)
 
 # Configure structured logging
 logging.basicConfig(
@@ -106,10 +112,18 @@ async def lifespan(app: FastAPI):
     logger.info(f"✅ Memory store initialized ({settings.MEMORY_BACKEND})")
     logger.info(f"✅ LLM providers: {llm_router.list_providers()}")
     
+    # Initialize security auto-responder
+    await initialize_auto_responder()
+    logger.info("✅ Security auto-responder initialized")
+    
     yield
     
     # Shutdown
     logger.info("🛑 MasterClaw Core shutting down...")
+    
+    # Shutdown security auto-responder
+    await shutdown_auto_responder()
+    logger.info("✅ Security auto-responder shutdown complete")
 
 
 # Create FastAPI app with interactive API documentation
@@ -138,6 +152,7 @@ app = FastAPI(
     openapi_tags=[
         {"name": "root", "description": "Root and health endpoints"},
         {"name": "health", "description": "Health and security checks"},
+        {"name": "security", "description": "Security management - IP blocking and auto-response"},
         {"name": "monitoring", "description": "Prometheus metrics and monitoring"},
         {"name": "chat", "description": "AI chat and conversation"},
         {"name": "memory", "description": "Memory storage and semantic search"},
@@ -154,6 +169,8 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
 # Add security and logging middleware (order matters - last added = first executed)
+# IP Block middleware should be first to block banned IPs immediately
+app.add_middleware(IPBlockMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     RateLimitMiddleware,
@@ -248,6 +265,99 @@ async def security_health_check():
     
     status_code = 200 if report["secure"] else 503
     return JSONResponse(content=safe_report, status_code=status_code)
+
+
+@app.get("/security/blocks", tags=["security"])
+async def list_blocked_ips():
+    """
+    List all currently blocked IP addresses.
+    
+    Returns a list of blocked IPs with their block reasons and expiration times.
+    Requires admin API key.
+    """
+    blocked = auto_responder.list_blocked_ips()
+    
+    return {
+        "blocked_ips": [
+            {
+                "ip_address": b.ip_address,
+                "blocked_at": b.blocked_at.isoformat(),
+                "expires_at": b.expires_at.isoformat(),
+                "reason": b.reason.value,
+                "threat_level": b.threat_level,
+                "blocked_by": b.blocked_by,
+            }
+            for b in blocked
+        ],
+        "total": len(blocked),
+    }
+
+
+@app.post("/security/blocks", tags=["security"])
+async def block_ip_endpoint(
+    ip_address: str,
+    reason: str = "manual",
+    duration_minutes: int = 60,
+    threat_level: str = "medium"
+):
+    """
+    Manually block an IP address.
+    
+    Args:
+        ip_address: The IP address to block
+        reason: Block reason (brute_force, rate_limit_violation, suspicious_activity, etc.)
+        duration_minutes: How long to block (0 = permanent)
+        threat_level: Severity level (low, medium, high, critical)
+    
+    Returns the created block record.
+    """
+    from .security_response import BlockReason
+    
+    try:
+        blocked = await auto_responder.block_ip(
+            ip_address=ip_address,
+            reason=BlockReason(reason),
+            duration_minutes=duration_minutes,
+            threat_level=threat_level,
+            blocked_by="manual",
+        )
+        
+        return {
+            "status": "blocked",
+            "ip_address": blocked.ip_address,
+            "expires_at": blocked.expires_at.isoformat(),
+            "reason": blocked.reason.value,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/security/blocks/{ip_address}", tags=["security"])
+async def unblock_ip_endpoint(ip_address: str):
+    """
+    Unblock a previously blocked IP address.
+    
+    Returns 404 if the IP was not blocked.
+    """
+    success = await auto_responder.unblock_ip(ip_address, unblocked_by="manual")
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"IP {ip_address} is not blocked")
+    
+    return {
+        "status": "unblocked",
+        "ip_address": ip_address,
+    }
+
+
+@app.get("/security/auto-responder/stats", tags=["security"])
+async def auto_responder_stats():
+    """
+    Get security auto-responder statistics.
+    
+    Returns information about active rules, blocked IPs, and response actions.
+    """
+    return auto_responder.get_stats()
 
 
 @app.get("/metrics", tags=["monitoring"])
