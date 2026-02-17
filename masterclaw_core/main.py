@@ -76,6 +76,7 @@ from .security_response import (
     initialize_auto_responder,
     shutdown_auto_responder,
 )
+from .tasks import task_queue
 
 # Configure structured logging
 logging.basicConfig(
@@ -123,10 +124,18 @@ async def lifespan(app: FastAPI):
     await initialize_auto_responder()
     logger.info("✅ Security auto-responder initialized")
     
+    # Start background task queue
+    await task_queue.start()
+    logger.info(f"✅ Task queue started ({task_queue.max_workers} workers)")
+    
     yield
     
     # Shutdown
     logger.info("🛑 MasterClaw Core shutting down...")
+    
+    # Shutdown task queue gracefully
+    await task_queue.stop()
+    logger.info("✅ Task queue shutdown complete")
     
     # Shutdown security auto-responder
     await shutdown_auto_responder()
@@ -247,6 +256,11 @@ async def health_check():
         "memory": settings.MEMORY_BACKEND,
         "llm_providers": llm_router.list_providers(),
         "prometheus_metrics": True,
+        "task_queue": {
+            "running": task_queue.running,
+            "workers": task_queue.max_workers,
+            "queue_size": task_queue.get_queue_size(),
+        },
     }
     
     return HealthResponse(
