@@ -5,6 +5,28 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Batch Memory Import/Export API** - Efficient bulk memory operations
+  - `POST /v1/memory/batch` - Import up to 1000 memories in a single request
+    - Skip duplicate detection based on content hash
+    - Source prefix for tracking import origin
+    - Detailed import report with success/failure counts
+  - `POST /v1/memory/export` - Export memories with flexible filtering
+    - Semantic search query filtering
+    - Metadata, source, and date range filters
+    - Up to 5000 memories per export request
+  - New Pydantic models: `BatchMemoryImportRequest`, `BatchMemoryImportResponse`, `MemoryExportRequest`, `MemoryExportResponse`
+  - Complements existing single-memory endpoints for migration and backup workflows
+- **Tool Use Framework** - Comprehensive tool calling system for AI agents
+  - `GET /v1/tools` - List all available tools with their definitions
+  - `GET /v1/tools/{tool_name}` - Get detailed information about a specific tool
+  - `POST /v1/tools/execute` - Execute a tool with provided parameters
+  - `GET /v1/tools/definitions/openai` - Get tools in OpenAI function format
+  - **GitHub Tool** - Full GitHub API integration (repos, issues, PRs, comments)
+  - **System Tool** - Safe system commands and information (with security restrictions)
+  - **Weather Tool** - Weather data via Open-Meteo API (no API key required)
+  - Extensible registry for adding custom tools
+  - Parameter validation and type checking
+  - Security controls for dangerous operations
 - **Interactive API Documentation** - Auto-generated docs with Swagger UI and ReDoc
   - Swagger UI at `/docs` - Interactive API explorer with "Try it out" feature
   - ReDoc at `/redoc` - Clean, responsive API reference documentation  

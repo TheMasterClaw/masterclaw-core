@@ -51,6 +51,43 @@ class MemorySearchResponse(BaseModel):
     total_results: int = Field(0, description="Total matching results")
 
 
+class BatchMemoryImportRequest(BaseModel):
+    """Request model for batch memory import"""
+    memories: List[MemoryEntry] = Field(..., description="List of memories to import", min_length=1, max_length=1000)
+    skip_duplicates: bool = Field(True, description="Skip memories with duplicate content")
+    source_prefix: Optional[str] = Field(None, description="Optional prefix to add to memory sources")
+
+
+class BatchMemoryImportResponse(BaseModel):
+    """Response model for batch memory import"""
+    success: bool = Field(..., description="Whether the batch import succeeded")
+    imported_count: int = Field(0, description="Number of memories successfully imported")
+    skipped_count: int = Field(0, description="Number of memories skipped (duplicates)")
+    failed_count: int = Field(0, description="Number of memories that failed to import")
+    memory_ids: List[str] = Field(default_factory=list, description="IDs of imported memories")
+    errors: List[Dict[str, Any]] = Field(default_factory=list, description="List of errors if any")
+    duration_ms: float = Field(..., description="Import duration in milliseconds")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class MemoryExportRequest(BaseModel):
+    """Request model for memory export"""
+    query: Optional[str] = Field(None, description="Optional search query to filter memories")
+    filter_metadata: Optional[Dict[str, Any]] = Field(None, description="Metadata filters")
+    limit: int = Field(1000, ge=1, le=5000, description="Maximum memories to export")
+    since: Optional[datetime] = Field(None, description="Only export memories since this date")
+    source_filter: Optional[str] = Field(None, description="Filter by source (exact match)")
+
+
+class MemoryExportResponse(BaseModel):
+    """Response model for memory export"""
+    success: bool = Field(..., description="Whether the export succeeded")
+    memories: List[MemoryEntry] = Field(default_factory=list, description="Exported memories")
+    total_count: int = Field(0, description="Total number of memories exported")
+    query_applied: Optional[str] = Field(None, description="Query used for filtering if any")
+    exported_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class HealthResponse(BaseModel):
     """Health check response"""
     status: str = Field("healthy", description="Service status")

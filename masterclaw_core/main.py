@@ -21,6 +21,10 @@ from .models import (
     MemoryEntry,
     MemorySearchRequest,
     MemorySearchResponse,
+    BatchMemoryImportRequest,
+    BatchMemoryImportResponse,
+    MemoryExportRequest,
+    MemoryExportResponse,
     HealthResponse,
     AnalyticsStatsRequest,
     AnalyticsStatsResponse,
@@ -46,6 +50,7 @@ from .analytics import analytics
 from .llm import router as llm_router
 from .memory import get_memory_store, MemoryStore
 from .websocket import manager
+from .tools import registry as tool_registry
 from .middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
@@ -159,6 +164,7 @@ app = FastAPI(
         {"name": "sessions", "description": "Session management"},
         {"name": "analytics", "description": "Usage analytics and statistics"},
         {"name": "costs", "description": "LLM cost tracking and pricing"},
+        {"name": "tools", "description": "Tool use framework - GitHub, system, weather"},
     ],
 )
 
@@ -221,6 +227,10 @@ async def root():
             "/v1/sessions/{session_id}",
             "/v1/sessions/{session_id} (DELETE)",
             "/v1/sessions/stats/summary",
+            "/v1/tools",
+            "/v1/tools/{tool_name}",
+            "/v1/tools/execute",
+            "/v1/tools/definitions/openai",
         ],
     }
 
@@ -586,6 +596,149 @@ async def delete_memory(memory_id: str):
         "success": True,
         "message": "Memory deleted successfully",
     }
+
+
+@app.post("/v1/memory/batch", response_model=BatchMemoryImportResponse, tags=["memory"])
+async def batch_import_memories(
+    request: BatchMemoryImportRequest,
+    http_request: Request
+):
+    """
+    Batch import multiple memories efficiently.
+    
+    - Import up to 1000 memories in a single request
+    - Optionally skip duplicates based on content hash
+    - Add source prefix to track import origin
+    
+    **Use Cases:**
+    - Migrating from other systems
+    - Restoring from backups
+    - Bulk data ingestion
+    
+    **Rate Limiting:** This endpoint has stricter rate limits due to resource usage.
+    """
+    import time
+    start_time = time.time()
+    
+    imported_ids = []
+    errors = []
+    skipped = 0
+    
+    # Track existing content hashes to detect duplicates within the batch
+    seen_content = set()
+    
+    for idx, entry in enumerate(request.memories):
+        try:
+            # Check for duplicates within batch
+            content_hash = hash(f"{entry.content}:{entry.source}")
+            if request.skip_duplicates and content_hash in seen_content:
+                skipped += 1
+                continue
+            seen_content.add(content_hash)
+            
+            # Add source prefix if specified
+            source = entry.source
+            if request.source_prefix:
+                source = f"{request.source_prefix}:{source or 'import'}"
+            
+            # Import the memory
+            memory_id = await memory.add(
+                content=entry.content,
+                metadata=entry.metadata,
+                source=source,
+            )
+            imported_ids.append(memory_id)
+            prom_metrics.track_memory_operation("add", success=True)
+            
+        except Exception as e:
+            prom_metrics.track_memory_operation("add", success=False)
+            errors.append({
+                "index": idx,
+                "content_preview": entry.content[:100] if entry.content else "",
+                "error": str(e),
+            })
+    
+    duration_ms = (time.time() - start_time) * 1000
+    
+    return BatchMemoryImportResponse(
+        success=len(errors) == 0,
+        imported_count=len(imported_ids),
+        skipped_count=skipped,
+        failed_count=len(errors),
+        memory_ids=imported_ids,
+        errors=errors[:10],  # Limit errors returned
+        duration_ms=duration_ms,
+    )
+
+
+@app.post("/v1/memory/export", response_model=MemoryExportResponse, tags=["memory"])
+async def export_memories(
+    request: MemoryExportRequest,
+    http_request: Request
+):
+    """
+    Export memories with optional filtering.
+    
+    - Export by search query (semantic similarity)
+    - Filter by metadata, source, or date range
+    - Up to 5000 memories per request
+    
+    **Use Cases:**
+    - Creating backups
+    - Data migration
+    - Analysis and auditing
+    
+    **Note:** For large exports, consider using pagination with multiple requests.
+    """
+    try:
+        # Determine search strategy based on request
+        if request.query:
+            # Semantic search
+            results = await memory.search(
+                query=request.query,
+                top_k=request.limit,
+                filter_metadata=request.filter_metadata
+            )
+        else:
+            # Get all memories (empty search returns recent memories)
+            results = await memory.search(
+                query="*",
+                top_k=request.limit,
+                filter_metadata=request.filter_metadata
+            )
+        
+        # Apply additional filters
+        filtered_results = []
+        for mem in results:
+            # Filter by source if specified
+            if request.source_filter and mem.source != request.source_filter:
+                continue
+            
+            # Filter by date if specified
+            if request.since and mem.timestamp < request.since:
+                continue
+            
+            filtered_results.append(mem)
+            
+            if len(filtered_results) >= request.limit:
+                break
+        
+        return MemoryExportResponse(
+            success=True,
+            memories=filtered_results,
+            total_count=len(filtered_results),
+            query_applied=request.query,
+        )
+        
+    except Exception as e:
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=e,
+            public_message="Failed to export memories",
+            log_message="Memory export failed",
+            request_id=request_id
+        )
 
 
 # =============================================================================
@@ -1217,3 +1370,142 @@ async def chat_stream(websocket: WebSocket, session_id: str):
             pass
         finally:
             manager.disconnect(websocket, session_id)
+
+
+# =============================================================================
+# Tool Use Endpoints
+# =============================================================================
+
+@app.get("/v1/tools", tags=["tools"])
+async def list_tools():
+    """
+    List all available tools and their definitions.
+    
+    Returns information about built-in tools (GitHub, system, weather)
+    and their parameters for use with the tool execution endpoint.
+    """
+    return {
+        "tools": tool_registry.get_tools_info(),
+        "count": len(tool_registry.list_tools()),
+        "available": tool_registry.list_tools(),
+    }
+
+
+@app.get("/v1/tools/{tool_name}", tags=["tools"])
+async def get_tool_details(tool_name: str):
+    """
+    Get detailed information about a specific tool.
+    
+    - **tool_name**: Name of the tool (github, system, weather)
+    
+    Returns the tool's definition including parameters and requirements.
+    """
+    tool = tool_registry.get(tool_name)
+    if not tool:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tool '{tool_name}' not found"
+        )
+    
+    definition = tool.definition
+    return {
+        "name": definition.name,
+        "description": definition.description,
+        "parameters": [
+            {
+                "name": p.name,
+                "type": p.type,
+                "description": p.description,
+                "required": p.required,
+                "default": p.default,
+                "enum": p.enum,
+            }
+            for p in definition.parameters
+        ],
+        "requires_confirmation": definition.requires_confirmation,
+        "dangerous": definition.dangerous,
+    }
+
+
+@app.post("/v1/tools/execute", tags=["tools"])
+async def execute_tool(request: Request, http_request: Request):
+    """
+    Execute a tool with the provided parameters.
+    
+    **Request body:**
+    ```json
+    {
+        "tool": "github",
+        "params": {
+            "action": "list_repos"
+        }
+    }
+    ```
+    
+    **Available tools:**
+    - `github` - GitHub API integration (requires GITHUB_TOKEN)
+    - `system` - System commands and information
+    - `weather` - Weather data via Open-Meteo API
+    
+    Returns the tool execution result or error.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON body"
+        )
+    
+    tool_name = data.get("tool")
+    params = data.get("params", {})
+    
+    if not tool_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'tool' is required"
+        )
+    
+    start_time = time.time()
+    
+    try:
+        result = await tool_registry.execute(tool_name, params)
+        
+        # Track metrics
+        duration_ms = (time.time() - start_time) * 1000
+        prom_metrics.track_request("POST", "/v1/tools/execute", 200 if result.success else 500, duration_ms)
+        
+        return {
+            "success": result.success,
+            "data": result.data,
+            "error": result.error,
+            "timestamp": result.timestamp.isoformat(),
+            "execution_time_ms": round(duration_ms, 2),
+        }
+    
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        prom_metrics.track_request("POST", "/v1/tools/execute", 500, duration_ms)
+        
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=e,
+            public_message="Tool execution failed",
+            log_message=f"Tool execution failed for: {tool_name}",
+            request_id=request_id
+        )
+
+
+@app.get("/v1/tools/definitions/openai", tags=["tools"])
+async def get_openai_tool_definitions():
+    """
+    Get tool definitions in OpenAI function calling format.
+    
+    Returns tools formatted for use with OpenAI's function calling API.
+    This can be passed directly to the OpenAI API's `tools` parameter.
+    """
+    return {
+        "tools": tool_registry.get_definitions(),
+        "count": len(tool_registry.list_tools()),
+    }
