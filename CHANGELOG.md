@@ -5,6 +5,16 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Correlation ID System** - Distributed tracing for CLI operations
+  - Unique correlation IDs generated for each command execution
+  - IDs propagated through logger, audit log, and event systems
+  - Environment variable `MC_CORRELATION_ID` for CI/CD integration
+  - HTTP header `x-correlation-id` support for API calls
+  - Child correlation IDs for sub-operations (hierarchical tracing)
+  - Security: IDs validated and sanitized to prevent injection
+  - New `lib/correlation.js` module with 66 comprehensive tests
+  - `wrapCommandWithCorrelation()` for automatic command tracing
+  - Enables end-to-end tracing of operations across log types
 - **Event Tracking System (`mc events`)** - Centralized event tracking and notification history
   - `mc events list` — List events with filtering by type, severity, source, and time
   - `mc events show <id>` — Display detailed event information
