@@ -39,15 +39,20 @@ def mock_settings():
 @pytest.fixture(autouse=True)
 def reset_singletons():
     """Reset singleton instances between tests"""
-    from masterclaw_core import memory
-    
-    # Reset memory store singleton
-    memory.memory_store = None
+    # Import memory module only if available (some tests don't need it)
+    try:
+        from masterclaw_core import memory
+        # Reset memory store singleton
+        memory.memory_store = None
+    except ImportError:
+        # chromadb not installed, skip memory reset
+        memory = None
     
     yield
     
     # Reset again after test
-    memory.memory_store = None
+    if memory is not None:
+        memory.memory_store = None
 
 
 @pytest.fixture

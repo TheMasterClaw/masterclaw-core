@@ -15,6 +15,8 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .audit_logger import audit_logger, SecuritySeverity
+
 
 # Configure logging
 logging.basicConfig(
@@ -31,7 +33,12 @@ logger = logging.getLogger("masterclaw")
 # Regex patterns for common injection attacks
 SQL_INJECTION_PATTERN = re.compile(
     r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION|DECLARE|CAST)\b)|"
-    r"(--)|(;)|(/\*)|(\*/)|(@@)|(\bOR\b\s+\d+\s*=\s*\d+)|(\bAND\b\s+\d+\s*=\s*\d+)",
+    r"(--)|(;)|(/\*)|(\*/)|(@@)|"
+    r"(\bOR\b\s+['\"]?\d+['\"]?\s*=\s*['\"]?\d+['\"]?)|"
+    r"(\bAND\b\s+['\"]?\d+['\"]?\s*=\s*['\"]?\d+['\"]?)|"
+    r"('\s*OR\s+'?\d)|('\s*AND\s+'?\d)|"
+    r"(\bOR\b\s*['\"]\w+['\"]\s*=\s*['\"]\w+['\"])|"
+    r"(\bWAITFOR\b\s+\bDELAY\b)|(\bBENCHMARK\b)|(\bSLEEP\b\s*\()",
     re.IGNORECASE
 )
 
@@ -252,6 +259,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 f"[{request_id}] Rate limit exceeded for {client_id}: "
                 f"{request_count}/{self.requests_per_minute} requests"
             )
+            # Log security audit event for rate limiting
+            audit_logger.rate_limit_exceeded(
+                message=f"Rate limit exceeded: {request_count}/{self.requests_per_minute} requests",
+                client_ip=client_id,
+                request_id=request_id,
+                resource=request.url.path,
+                details={
+                    "limit": self.requests_per_minute,
+                    "window_seconds": self.window_seconds,
+                    "current_requests": request_count,
+                    "user_agent": request.headers.get("User-Agent")
+                }
+            )
             return JSONResponse(
                 status_code=429,
                 content={
@@ -328,7 +348,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 def require_api_key(func: Callable) -> Callable:
-    """Decorator to require API key for endpoint with timing attack protection"""
+    """Decorator to require API key for endpoint with timing attack protection and audit logging"""
     @wraps(func)
     async def wrapper(*args, **kwargs):
         # Extract request from args/kwargs
@@ -345,12 +365,30 @@ def require_api_key(func: Callable) -> Callable:
         # Get request ID for logging
         request_id = getattr(request.state, 'request_id', 'unknown')
         
+        # Get client IP for audit logging
+        client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+        user_agent = request.headers.get("User-Agent")
+        
         # Get API key from header with input sanitization
         api_key_header = request.headers.get("X-API-Key", "")
         try:
             api_key = sanitize_input(api_key_header, max_length=256)
         except ValueError as e:
             logger.warning(f"[{request_id}] Rejected API key with suspicious content")
+            # Log security audit event for suspicious API key
+            audit_logger.input_validation_failed(
+                message="API key rejected due to suspicious content (possible injection)",
+                client_ip=client_ip.split(',')[0].strip() if ',' in client_ip else client_ip,
+                request_id=request_id,
+                user_agent=user_agent,
+                resource=request.url.path,
+                details={
+                    "reason": "suspicious_content",
+                    "field": "X-API-Key",
+                    "error": str(e)
+                },
+                severity=SecuritySeverity.HIGH
+            )
             return JSONResponse(
                 status_code=401,
                 content={"error": "Invalid API key format"}
@@ -363,8 +401,21 @@ def require_api_key(func: Callable) -> Callable:
         
         # Use constant-time comparison to prevent timing attacks
         if expected_key and not safe_compare_keys(api_key, expected_key):
-            client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
             logger.warning(f"[{request_id}] Invalid API key attempt from {client_ip}")
+            # Log security audit event for failed authentication
+            audit_logger.auth_failure(
+                message="Invalid API key provided",
+                client_ip=client_ip.split(',')[0].strip() if ',' in client_ip else client_ip,
+                request_id=request_id,
+                user_agent=user_agent,
+                resource=request.url.path,
+                details={
+                    "reason": "invalid_key",
+                    "has_key": bool(api_key),
+                    "key_length": len(api_key) if api_key else 0
+                },
+                severity=SecuritySeverity.MEDIUM
+            )
             return JSONResponse(
                 status_code=401,
                 content={"error": "Invalid or missing API key"}
