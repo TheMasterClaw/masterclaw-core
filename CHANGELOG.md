@@ -4,6 +4,13 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Circuit Breaker Audit Logging** - Fixed undefined `getAudit()` function error
+  - Resolved ReferenceError when circuit breaker transitions between states
+  - Import `logAudit` directly from audit module instead of undefined `getAudit()`
+  - Fixed 15 test failures in circuit-breaker.test.js
+  - Ensures audit events are properly logged when circuits open/close
+
 ### Added
 - **Correlation ID System** - Distributed tracing for CLI operations
   - Unique correlation IDs generated for each command execution
