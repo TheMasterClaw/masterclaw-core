@@ -5,6 +5,14 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Config Command Module (`mc config`)** - Complete configuration management for CLI
+  - `mc config list` — Display all configuration values with security masking
+  - `mc config get <key>` — Retrieve specific values using dot notation
+  - `mc config set <key> <value>` — Update configuration with type inference
+  - `mc config export [file]` — Export config to JSON with sensitive value masking
+  - `mc config import <file>` — Import config with diff preview and dry-run support
+  - `mc config reset` — Reset to defaults with confirmation protection
+  - Security features: rate limiting, sensitive value masking, prototype pollution protection
 - **Security Auto-Responder Path Fallback** - Improved error handling for file system operations
   - Automatic fallback to alternate paths when default paths aren't writable
   - Graceful handling of permission errors with informative logging
