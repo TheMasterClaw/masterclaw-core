@@ -5,6 +5,12 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Error Handler JSON Output Mode** - Structured JSON error output for production/CI environments
+  - Set `MC_JSON_OUTPUT=1` to enable machine-readable error output
+  - Structured JSON schema with timestamp, category, exit code, message, and error details
+  - Sensitive data automatically masked in JSON output
+  - Useful for log aggregation (ELK, Splunk, cloud logging) and CI/CD pipelines
+  - Global error handlers (unhandled rejections, uncaught exceptions) also support JSON mode
 - **Chat Command Security Hardening** - Enhanced security for `mc chat` command
   - Input validation: max length (10,000 chars), line count limits, dangerous pattern detection
   - XSS protection: blocks script tags, event handlers, javascript: URLs, data:text/html
