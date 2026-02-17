@@ -2,8 +2,9 @@
 
 import asyncio
 from typing import Callable, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
+import uuid
 
 logger = logging.getLogger("masterclaw")
 
@@ -29,7 +30,9 @@ class TaskQueue:
         """Stop the task queue"""
         self.running = False
         # Wait for all workers to finish
-        await asyncio.gather(*self.workers, return_exceptions=True)
+        if self.workers:
+            await asyncio.gather(*self.workers, return_exceptions=True)
+            self.workers.clear()  # Clear workers list after stopping
         logger.info("Task queue stopped")
     
     async def _worker_loop(self, worker_id: str):
@@ -39,6 +42,7 @@ class TaskQueue:
                 # Wait for task with timeout
                 task = await asyncio.wait_for(self.queue.get(), timeout=1.0)
                 await self._execute_task(task)
+                self.queue.task_done()  # Mark task as done
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
@@ -62,7 +66,7 @@ class TaskQueue:
     
     async def submit(self, func: Callable, *args, **kwargs) -> str:
         """Submit a task to the queue"""
-        task_id = f"task_{datetime.utcnow().timestamp()}"
+        task_id = f"task_{datetime.now(timezone.utc).timestamp()}_{uuid.uuid4().hex[:8]}"
         await self.queue.put({
             'id': task_id,
             'func': func,

@@ -172,6 +172,40 @@ class SessionDeleteResponse(BaseModel):
     message: str = Field(..., description="Status message")
 
 
+class BulkSessionDeleteRequest(BaseModel):
+    """Request model for bulk session deletion"""
+    session_ids: Optional[List[str]] = Field(
+        None,
+        description="List of specific session IDs to delete. If provided, older_than_days is ignored."
+    )
+    older_than_days: int = Field(
+        30,
+        ge=1,
+        le=365,
+        description="Delete sessions older than N days (alternative to session_ids)"
+    )
+    dry_run: bool = Field(
+        False,
+        description="If true, only preview what would be deleted without actually deleting"
+    )
+
+
+class BulkSessionDeleteResponse(BaseModel):
+    """Response model for bulk session deletion"""
+    success: bool = Field(..., description="Whether the operation succeeded")
+    sessions_deleted: int = Field(0, description="Number of sessions deleted")
+    sessions_failed: int = Field(0, description="Number of sessions that failed to delete")
+    memories_deleted: int = Field(0, description="Total memories deleted across all sessions")
+    dry_run: bool = Field(False, description="Whether this was a dry run")
+    deleted_session_ids: List[str] = Field(default_factory=list, description="IDs of deleted sessions")
+    failed_session_ids: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="Sessions that failed to delete with error messages"
+    )
+    duration_ms: float = Field(..., description="Operation duration in milliseconds")
+    message: str = Field(..., description="Status message")
+
+
 # =============================================================================
 # Cost Tracking Models
 # =============================================================================

@@ -4,7 +4,7 @@ import logging
 import sys
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request, Depends
@@ -33,6 +33,8 @@ from .models import (
     SessionInfo,
     SessionHistoryResponse,
     SessionDeleteResponse,
+    BulkSessionDeleteRequest,
+    BulkSessionDeleteResponse,
     PaginationParams,
     SessionHistoryParams,
     CostSummaryRequest,
@@ -218,6 +220,8 @@ async def root():
             "/v1/memory/search",
             "/v1/memory/add",
             "/v1/memory/{memory_id}",
+            "/v1/memory/batch",
+            "/v1/memory/export",
             "/v1/analytics",
             "/v1/analytics/stats",
             "/v1/costs",
@@ -226,6 +230,7 @@ async def root():
             "/v1/sessions",
             "/v1/sessions/{session_id}",
             "/v1/sessions/{session_id} (DELETE)",
+            "/v1/sessions/bulk-delete (NEW)",
             "/v1/sessions/stats/summary",
             "/v1/tools",
             "/v1/tools/{tool_name}",
@@ -1033,6 +1038,138 @@ async def get_session_stats(http_request: Request):
             log_message="Session stats computation failed",
             request_id=request_id
         )
+
+
+@app.post("/v1/sessions/bulk-delete", response_model=BulkSessionDeleteResponse, tags=["sessions"])
+async def bulk_delete_sessions(
+    request: BulkSessionDeleteRequest,
+    http_request: Request
+):
+    """
+    Bulk delete multiple sessions efficiently.
+
+    Delete sessions by:
+    - **session_ids**: Explicit list of session IDs to delete
+    - **older_than_days**: Delete all sessions older than N days
+
+    Features:
+    - **Dry run mode**: Preview what would be deleted without making changes
+    - **Atomic tracking**: Reports exactly what was deleted and what failed
+    - **Performance**: Single API call instead of N individual deletes
+
+    **Rate Limiting:** This endpoint has stricter rate limits due to resource usage.
+    """
+    import time
+    start_time = time.time()
+
+    deleted_sessions = []
+    failed_sessions = []
+    total_memories_deleted = 0
+
+    try:
+        # Determine which sessions to delete
+        sessions_to_delete = []
+
+        if request.session_ids:
+            # Use explicit list
+            sessions_to_delete = request.session_ids
+        else:
+            # Find sessions older than specified days
+            cutoff = datetime.utcnow() - timedelta(days=request.older_than_days)
+
+            # Get all sessions (up to 500 for bulk operations)
+            sessions_response = await list_sessions(
+                http_request=http_request,
+                limit=500,
+                offset=0
+            )
+
+            for session in sessions_response.sessions:
+                if session.last_active < cutoff:
+                    sessions_to_delete.append(session.session_id)
+
+        # Dry run: return preview without deleting
+        if request.dry_run:
+            duration_ms = (time.time() - start_time) * 1000
+            return BulkSessionDeleteResponse(
+                success=True,
+                sessions_deleted=0,
+                sessions_failed=0,
+                memories_deleted=0,
+                dry_run=True,
+                deleted_session_ids=[],
+                failed_session_ids=[],
+                duration_ms=duration_ms,
+                message=f"DRY RUN: Would delete {len(sessions_to_delete)} sessions"
+            )
+
+        # Perform deletions
+        for session_id in sessions_to_delete:
+            try:
+                # Validate session ID
+                validated_id = validate_session_id(session_id)
+
+                # Find all memories for this session
+                session_memories = await memory.search(
+                    query="",
+                    top_k=1000,
+                    filter_metadata={"session_id": validated_id}
+                )
+
+                # Delete all associated memories
+                memories_deleted = 0
+                for mem in session_memories:
+                    if mem.id and await memory.delete(mem.id):
+                        memories_deleted += 1
+
+                total_memories_deleted += memories_deleted
+                deleted_sessions.append(validated_id)
+                prom_metrics.track_memory_operation("delete", success=True)
+
+            except Exception as e:
+                failed_sessions.append({
+                    "session_id": session_id,
+                    "error": str(e)
+                })
+                prom_metrics.track_memory_operation("delete", success=False)
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        # Track metrics
+        prom_metrics.track_request(
+            "POST", "/v1/sessions/bulk-delete", 
+            200 if len(failed_sessions) == 0 else 207, 
+            duration_ms
+        )
+
+        success = len(failed_sessions) == 0
+
+        return BulkSessionDeleteResponse(
+            success=success,
+            sessions_deleted=len(deleted_sessions),
+            sessions_failed=len(failed_sessions),
+            memories_deleted=total_memories_deleted,
+            dry_run=False,
+            deleted_session_ids=deleted_sessions,
+            failed_session_ids=failed_sessions,
+            duration_ms=duration_ms,
+            message=f"Deleted {len(deleted_sessions)} sessions ({total_memories_deleted} memories)" +
+                   (f", {len(failed_sessions)} failed" if failed_sessions else "")
+        )
+
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        prom_metrics.track_request("POST", "/v1/sessions/bulk-delete", 500, duration_ms)
+
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=e,
+            public_message="Failed to perform bulk session deletion",
+            log_message=f"Bulk delete failed: {str(e)[:200]}",
+            request_id=request_id
+        )
+
 
 @app.get("/v1/analytics", response_model=AnalyticsSummaryResponse, tags=["analytics"])
 async def analytics_summary():
