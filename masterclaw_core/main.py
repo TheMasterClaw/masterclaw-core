@@ -57,6 +57,9 @@ from .exceptions import (
     http_exception_handler,
     validation_exception_handler,
     general_exception_handler,
+    get_secure_error_message,
+    raise_secure_http_exception,
+    secure_endpoint,
 )
 from . import metrics as prom_metrics
 from .security import validate_session_id
@@ -329,14 +332,20 @@ async def chat(request: ChatRequest, http_request: Request):
         duration_ms = (time.time() - start_time) * 1000
         analytics.track_request("/v1/chat", duration_ms, status_code)
         prom_metrics.track_request("POST", "/v1/chat", status_code, duration_ms)
-        raise HTTPException(
+        
+        # Use secure error handling to prevent information leakage
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Chat error: {str(e)}",
+            error=e,
+            public_message="Chat processing failed",
+            log_message=f"Chat error for session: {request.session_id}",
+            request_id=request_id
         )
 
 
 @app.post("/v1/memory/search", response_model=MemorySearchResponse, tags=["memory"])
-async def search_memory(request: MemorySearchRequest):
+async def search_memory(request: MemorySearchRequest, http_request: Request):
     """Search for memories using semantic similarity"""
     start_time = time.time()
     
@@ -365,14 +374,20 @@ async def search_memory(request: MemorySearchRequest):
         analytics.track_request("/v1/memory/search", duration_ms, 500)
         prom_metrics.track_request("POST", "/v1/memory/search", 500, duration_ms)
         prom_metrics.track_memory_operation("search", success=False)
-        raise HTTPException(
+        
+        # Use secure error handling to prevent information leakage
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search error: {str(e)}",
+            error=e,
+            public_message="Failed to search memories",
+            log_message=f"Memory search failed for query: {request.query[:100]}",
+            request_id=request_id
         )
 
 
 @app.post("/v1/memory/add", response_model=dict, tags=["memory"])
-async def add_memory(entry: MemoryEntry):
+async def add_memory(entry: MemoryEntry, http_request: Request):
     """Add a new memory entry"""
     try:
         memory_id = await memory.add(
@@ -390,9 +405,13 @@ async def add_memory(entry: MemoryEntry):
         }
     except Exception as e:
         prom_metrics.track_memory_operation("add", success=False)
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Add error: {str(e)}",
+            error=e,
+            public_message="Failed to add memory",
+            log_message="Memory add operation failed",
+            request_id=request_id
         )
 
 
@@ -433,6 +452,7 @@ async def delete_memory(memory_id: str):
 
 @app.get("/v1/sessions", response_model=SessionListResponse, tags=["sessions"])
 async def list_sessions(
+    http_request: Request,
     params: PaginationParams = Depends(),
     active_since_hours: Optional[int] = None
 ):
@@ -530,15 +550,20 @@ async def list_sessions(
     
     except Exception as e:
         prom_metrics.track_request("GET", "/v1/sessions", 500, 0)
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Session list error: {str(e)}"
+            error=e,
+            public_message="Failed to list sessions",
+            log_message="Session list operation failed",
+            request_id=request_id
         )
 
 
 @app.get("/v1/sessions/{session_id}", response_model=SessionHistoryResponse, tags=["sessions"])
 async def get_session_history(
     session_id: str,
+    http_request: Request,
     params: SessionHistoryParams = Depends()
 ):
     """
@@ -602,14 +627,18 @@ async def get_session_history(
         raise
     except Exception as e:
         prom_metrics.track_request("GET", "/v1/sessions/{id}", 500, 0)
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Session history error: {str(e)}"
+            error=e,
+            public_message="Failed to retrieve session history",
+            log_message=f"Session history failed for: {validated_session_id}",
+            request_id=request_id
         )
 
 
 @app.delete("/v1/sessions/{session_id}", response_model=SessionDeleteResponse, tags=["sessions"])
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, http_request: Request):
     """
     Delete a session and all associated chat memories.
     
@@ -650,14 +679,18 @@ async def delete_session(session_id: str):
     
     except Exception as e:
         prom_metrics.track_memory_operation("delete", success=False)
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Session deletion error: {str(e)}"
+            error=e,
+            public_message="Failed to delete session",
+            log_message=f"Session deletion failed for: {validated_session_id}",
+            request_id=request_id
         )
 
 
 @app.get("/v1/sessions/stats/summary", tags=["sessions"])
-async def get_session_stats():
+async def get_session_stats(http_request: Request):
     """
     Get aggregate session statistics.
     
@@ -666,7 +699,7 @@ async def get_session_stats():
     """
     try:
         # Get all sessions first
-        sessions_response = await list_sessions(limit=500, offset=0)
+        sessions_response = await list_sessions(http_request=http_request, limit=500, offset=0)
         sessions = sessions_response.sessions
         
         from datetime import timedelta
@@ -697,9 +730,13 @@ async def get_session_stats():
     
     except Exception as e:
         prom_metrics.track_request("GET", "/v1/sessions/stats/summary", 500, 0)
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Session stats error: {str(e)}"
+            error=e,
+            public_message="Failed to retrieve session statistics",
+            log_message="Session stats computation failed",
+            request_id=request_id
         )
 
 @app.get("/v1/analytics", response_model=AnalyticsSummaryResponse, tags=["analytics"])
@@ -720,7 +757,7 @@ async def analytics_summary():
 
 @app.post("/v1/analytics/stats", response_model=AnalyticsStatsResponse, tags=["analytics"])
 @app.get("/v1/analytics/stats", response_model=AnalyticsStatsResponse, tags=["analytics"])
-async def analytics_stats(days: int = 7):
+async def analytics_stats(http_request: Request, days: int = 7):
     """
     Get usage analytics and statistics.
     
@@ -733,9 +770,13 @@ async def analytics_stats(days: int = 7):
         stats = analytics.get_stats(days=days)
         return AnalyticsStatsResponse(**stats)
     except Exception as e:
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analytics error: {str(e)}",
+            error=e,
+            public_message="Failed to retrieve analytics",
+            log_message=f"Analytics stats failed for days={days}",
+            request_id=request_id
         )
 
 
@@ -744,7 +785,7 @@ async def analytics_stats(days: int = 7):
 # =============================================================================
 
 @app.get("/v1/costs", response_model=CostSummaryResponse, tags=["costs"])
-async def get_costs(days: int = 30):
+async def get_costs(http_request: Request, days: int = 30):
     """
     Get LLM usage cost summary.
     
@@ -783,14 +824,18 @@ async def get_costs(days: int = 30):
             timestamp=datetime.utcnow(),
         )
     except Exception as e:
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Cost summary error: {str(e)}",
+            error=e,
+            public_message="Failed to retrieve cost summary",
+            log_message=f"Cost summary failed for days={days}",
+            request_id=request_id
         )
 
 
 @app.get("/v1/costs/daily", response_model=DailyCostsResponse, tags=["costs"])
-async def get_daily_costs(days: int = 30):
+async def get_daily_costs(http_request: Request, days: int = 30):
     """
     Get daily cost breakdown.
     
@@ -806,14 +851,18 @@ async def get_daily_costs(days: int = 30):
             timestamp=datetime.utcnow(),
         )
     except Exception as e:
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Daily costs error: {str(e)}",
+            error=e,
+            public_message="Failed to retrieve daily costs",
+            log_message=f"Daily costs failed for days={days}",
+            request_id=request_id
         )
 
 
 @app.get("/v1/costs/pricing", response_model=PricingResponse, tags=["costs"])
-async def get_pricing():
+async def get_pricing(http_request: Request):
     """
     Get current pricing information for all supported models.
     
@@ -834,9 +883,13 @@ async def get_pricing():
             timestamp=datetime.utcnow(),
         )
     except Exception as e:
-        raise HTTPException(
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Pricing error: {str(e)}",
+            error=e,
+            public_message="Failed to retrieve pricing information",
+            log_message="Pricing retrieval failed",
+            request_id=request_id
         )
 
 
