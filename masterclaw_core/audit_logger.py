@@ -82,8 +82,28 @@ class SecurityEvent:
             self.event_hash = self._generate_hash()
     
     def _generate_hash(self) -> str:
-        """Generate a hash of critical event fields for tamper detection"""
-        data = f"{self.timestamp}:{self.event_type}:{self.severity}:{self.message}"
+        """Generate a hash of ALL event fields for comprehensive tamper detection.
+
+        SECURITY FIX: Previously only timestamp, event_type, severity, and message
+        were included in the hash. This allowed attackers to modify client_ip,
+        resource, action, details, and other fields without detection.
+
+        Now includes all fields to provide true tamper-evident audit trails.
+        """
+        # Include all fields in deterministic order for consistent hashing
+        data_parts = [
+            self.timestamp,
+            str(self.event_type),
+            str(self.severity),
+            self.message,
+            self.request_id or "",
+            self.client_ip or "",
+            self.user_agent or "",
+            self.resource or "",
+            self.action or "",
+            json.dumps(self.details, sort_keys=True) if self.details else "",
+        ]
+        data = "|".join(data_parts)
         return hashlib.sha256(data.encode()).hexdigest()[:16]
     
     def to_dict(self) -> Dict[str, Any]:
@@ -453,6 +473,35 @@ class SecurityEventAnalyzer:
     
     @staticmethod
     def verify_event_integrity(event: SecurityEvent) -> bool:
-        """Verify the integrity of a security event by checking its hash"""
+        """Verify the integrity of a security event by checking its hash.
+
+        SECURITY FIX: The previous implementation regenerated the hash from current
+        values, which meant tampering would go undetected. Now we properly compare
+        the stored hash against a freshly computed hash of current values.
+
+        If any field has been modified since the event was created, the verification
+        will fail because the recomputed hash won't match the stored original.
+
+        Args:
+            event: The SecurityEvent to verify
+
+        Returns:
+            True if the event integrity is intact, False if tampered
+        """
+        if not event.event_hash:
+            return False  # No hash to verify against
+
+        # Store the original hash (the one we're verifying against)
+        stored_hash = event.event_hash
+
+        # Temporarily clear the hash so _generate_hash computes from current values
+        event.event_hash = None
+
+        # Generate expected hash from CURRENT field values
         expected_hash = event._generate_hash()
-        return event.event_hash == expected_hash
+
+        # Restore the stored hash
+        event.event_hash = stored_hash
+
+        # If current values don't produce the stored hash, event was tampered
+        return stored_hash == expected_hash

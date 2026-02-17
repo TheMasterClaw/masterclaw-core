@@ -374,6 +374,155 @@ class TestSecurityEventAnalyzer:
         event.event_hash = original_hash
         assert SecurityEventAnalyzer.verify_event_integrity(event) is False
 
+    def test_verify_event_integrity_modified_client_ip(self):
+        """SECURITY TEST: Modifying client_ip invalidates hash"""
+        event = SecurityEvent(
+            event_type=SecurityEventType.AUTHENTICATION_FAILURE,
+            severity=SecuritySeverity.HIGH,
+            message="Failed login",
+            timestamp="2026-02-17T10:00:00Z",
+            client_ip="192.168.1.100"
+        )
+        
+        original_hash = event.event_hash
+        
+        # Simulate attacker trying to hide their IP
+        event.client_ip = "10.0.0.1"
+        event.event_hash = original_hash
+        
+        # Should fail verification - hash includes client_ip
+        assert SecurityEventAnalyzer.verify_event_integrity(event) is False
+    
+    def test_verify_event_integrity_modified_resource(self):
+        """SECURITY TEST: Modifying resource invalidates hash"""
+        event = SecurityEvent(
+            event_type=SecurityEventType.AUTHORIZATION_DENIED,
+            severity=SecuritySeverity.HIGH,
+            message="Access denied",
+            timestamp="2026-02-17T10:00:00Z",
+            resource="/admin/users"
+        )
+        
+        original_hash = event.event_hash
+        
+        # Simulate tampering with resource path
+        event.resource = "/public/status"
+        event.event_hash = original_hash
+        
+        # Should fail verification - hash includes resource
+        assert SecurityEventAnalyzer.verify_event_integrity(event) is False
+    
+    def test_verify_event_integrity_modified_details(self):
+        """SECURITY TEST: Modifying details dict invalidates hash"""
+        event = SecurityEvent(
+            event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+            severity=SecuritySeverity.CRITICAL,
+            message="SQL injection attempt",
+            timestamp="2026-02-17T10:00:00Z",
+            details={"pattern": "DROP TABLE", "field": "username", "severity": "high"}
+        )
+        
+        original_hash = event.event_hash
+        
+        # Simulate tampering with attack details
+        event.details["pattern"] = "SELECT * FROM"
+        event.event_hash = original_hash
+        
+        # Should fail verification - hash includes details
+        assert SecurityEventAnalyzer.verify_event_integrity(event) is False
+    
+    def test_verify_event_integrity_modified_action(self):
+        """SECURITY TEST: Modifying action invalidates hash"""
+        event = SecurityEvent(
+            event_type=SecurityEventType.AUTHENTICATION_SUCCESS,
+            severity=SecuritySeverity.INFO,
+            message="User authenticated",
+            timestamp="2026-02-17T10:00:00Z",
+            action="admin_login"
+        )
+        
+        original_hash = event.event_hash
+        
+        # Simulate tampering with action type
+        event.action = "user_login"
+        event.event_hash = original_hash
+        
+        # Should fail verification - hash includes action
+        assert SecurityEventAnalyzer.verify_event_integrity(event) is False
+    
+    def test_verify_event_integrity_modified_user_agent(self):
+        """SECURITY TEST: Modifying user_agent invalidates hash"""
+        event = SecurityEvent(
+            event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+            severity=SecuritySeverity.MEDIUM,
+            message="Unusual access pattern",
+            timestamp="2026-02-17T10:00:00Z",
+            user_agent="Mozilla/5.0 (MaliciousBot/1.0)"
+        )
+        
+        original_hash = event.event_hash
+        
+        # Simulate attacker trying to mask as legitimate browser
+        event.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        event.event_hash = original_hash
+        
+        # Should fail verification - hash includes user_agent
+        assert SecurityEventAnalyzer.verify_event_integrity(event) is False
+    
+    def test_verify_event_integrity_modified_request_id(self):
+        """SECURITY TEST: Modifying request_id invalidates hash"""
+        event = SecurityEvent(
+            event_type=SecurityEventType.RATE_LIMIT_EXCEEDED,
+            severity=SecuritySeverity.LOW,
+            message="Rate limit hit",
+            timestamp="2026-02-17T10:00:00Z",
+            request_id="req-abc-123-original"
+        )
+        
+        original_hash = event.event_hash
+        
+        # Simulate correlation ID tampering
+        event.request_id = "req-xyz-999-fake"
+        event.event_hash = original_hash
+        
+        # Should fail verification - hash includes request_id
+        assert SecurityEventAnalyzer.verify_event_integrity(event) is False
+    
+    def test_hash_includes_all_fields_consistently(self):
+        """SECURITY TEST: Hash generation is deterministic for identical events"""
+        event1 = SecurityEvent(
+            event_type=SecurityEventType.AUTHENTICATION_FAILURE,
+            severity=SecuritySeverity.HIGH,
+            message="Invalid credentials",
+            timestamp="2026-02-17T10:00:00Z",
+            request_id="req-123",
+            client_ip="192.168.1.50",
+            user_agent="Mozilla/5.0",
+            resource="/api/login",
+            action="authenticate",
+            details={"username": "admin", "attempt": 1}
+        )
+        
+        event2 = SecurityEvent(
+            event_type=SecurityEventType.AUTHENTICATION_FAILURE,
+            severity=SecuritySeverity.HIGH,
+            message="Invalid credentials",
+            timestamp="2026-02-17T10:00:00Z",
+            request_id="req-123",
+            client_ip="192.168.1.50",
+            user_agent="Mozilla/5.0",
+            resource="/api/login",
+            action="authenticate",
+            details={"username": "admin", "attempt": 1}
+        )
+        
+        # Identical events should have identical hashes
+        assert event1.event_hash == event2.event_hash
+        
+        # Both should verify successfully
+        assert SecurityEventAnalyzer.verify_event_integrity(event1) is True
+        assert SecurityEventAnalyzer.verify_event_integrity(event2) is True
+
 
 class TestSecurityEventEnums:
     """Test security event type and severity enums"""
