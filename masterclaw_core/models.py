@@ -135,6 +135,94 @@ class SessionDeleteResponse(BaseModel):
     message: str = Field(..., description="Status message")
 
 
+# =============================================================================
+# Cost Tracking Models
+# =============================================================================
+
+class CostEntry(BaseModel):
+    """Individual cost entry for an API call"""
+    provider: str = Field(..., description="LLM provider")
+    model: str = Field(..., description="Model used")
+    session_id: Optional[str] = Field(None, description="Associated session ID")
+    input_tokens: int = Field(0, description="Number of input tokens")
+    output_tokens: int = Field(0, description="Number of output tokens")
+    input_cost: float = Field(0.0, description="Cost for input tokens (USD)")
+    output_cost: float = Field(0.0, description="Cost for output tokens (USD)")
+    total_cost: float = Field(0.0, description="Total cost (USD)")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CostSummaryRequest(BaseModel):
+    """Request for cost summary"""
+    days: int = Field(30, ge=1, le=365, description="Number of days to look back")
+
+
+class ProviderCostBreakdown(BaseModel):
+    """Cost breakdown by provider"""
+    cost: float = Field(..., description="Total cost (USD)")
+    tokens: int = Field(..., description="Total tokens used")
+    requests: int = Field(..., description="Number of requests")
+
+
+class ModelCostBreakdown(BaseModel):
+    """Cost breakdown by model"""
+    cost: float = Field(..., description="Total cost (USD)")
+    tokens: int = Field(..., description="Total tokens used")
+    requests: int = Field(..., description="Number of requests")
+
+
+class SessionCostBreakdown(BaseModel):
+    """Cost breakdown by session"""
+    session_id: str = Field(..., description="Session identifier")
+    cost: float = Field(..., description="Total cost (USD)")
+    tokens: int = Field(..., description="Total tokens used")
+    requests: int = Field(..., description="Number of requests")
+
+
+class CostSummaryResponse(BaseModel):
+    """Response for cost summary"""
+    period_days: int = Field(..., description="Period in days")
+    total_cost: float = Field(..., description="Total cost in USD")
+    total_input_cost: float = Field(..., description="Total input cost in USD")
+    total_output_cost: float = Field(..., description="Total output cost in USD")
+    total_tokens: int = Field(..., description="Total tokens used")
+    total_input_tokens: int = Field(..., description="Total input tokens")
+    total_output_tokens: int = Field(..., description="Total output tokens")
+    total_requests: int = Field(..., description="Total number of requests")
+    average_cost_per_request: float = Field(..., description="Average cost per request")
+    by_provider: Dict[str, ProviderCostBreakdown] = Field(default_factory=dict)
+    by_model: Dict[str, ModelCostBreakdown] = Field(default_factory=dict)
+    top_sessions: List[SessionCostBreakdown] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DailyCostEntry(BaseModel):
+    """Cost entry for a single day"""
+    date: str = Field(..., description="Date in YYYY-MM-DD format")
+    cost: float = Field(..., description="Total cost for the day (USD)")
+    tokens: int = Field(..., description="Total tokens used")
+    requests: int = Field(..., description="Number of requests")
+
+
+class DailyCostsResponse(BaseModel):
+    """Response for daily cost breakdown"""
+    days: int = Field(..., description="Number of days")
+    daily_costs: List[DailyCostEntry] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PricingInfo(BaseModel):
+    """Pricing information for a model"""
+    input: float = Field(..., description="Input price per 1K tokens (USD)")
+    output: float = Field(..., description="Output price per 1K tokens (USD)")
+
+
+class PricingResponse(BaseModel):
+    """Response for pricing information"""
+    providers: Dict[str, Dict[str, PricingInfo]] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 class PaginationParams(BaseModel):
     """
     Validated pagination parameters for list endpoints.

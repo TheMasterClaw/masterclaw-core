@@ -31,6 +31,15 @@ from .models import (
     SessionDeleteResponse,
     PaginationParams,
     SessionHistoryParams,
+    CostSummaryRequest,
+    CostSummaryResponse,
+    DailyCostsResponse,
+    PricingResponse,
+    PricingInfo,
+    ProviderCostBreakdown,
+    ModelCostBreakdown,
+    SessionCostBreakdown,
+    DailyCostEntry,
 )
 
 from .analytics import analytics
@@ -153,6 +162,9 @@ async def root():
             "/v1/memory/{memory_id}",
             "/v1/analytics",
             "/v1/analytics/stats",
+            "/v1/costs",
+            "/v1/costs/daily",
+            "/v1/costs/pricing",
             "/v1/sessions",
             "/v1/sessions/{session_id}",
             "/v1/sessions/{session_id} (DELETE)",
@@ -274,10 +286,18 @@ async def chat(request: ChatRequest, http_request: Request):
         # Track analytics and Prometheus metrics
         duration_ms = (time.time() - start_time) * 1000
         analytics.track_request("/v1/chat", duration_ms, 200)
+        
+        # Estimate input/output tokens (rough approximation: 1 token ≈ 4 chars)
+        input_tokens = result.get("tokens_used", 0) // 2 if result.get("tokens_used") else len(request.message) // 4
+        output_tokens = result.get("tokens_used", 0) - input_tokens if result.get("tokens_used") else len(result["response"]) // 4
+        
         analytics.track_chat(
             provider=result["provider"],
             model=result["model"],
             tokens_used=result.get("tokens_used", 0),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            session_id=request.session_id
         )
         prom_metrics.track_request("POST", "/v1/chat", 200, duration_ms)
         prom_metrics.track_chat(
@@ -687,9 +707,12 @@ async def analytics_summary():
     """Get analytics system summary and available endpoints"""
     return AnalyticsSummaryResponse(
         status="available",
-        tracked_metrics=["requests", "chats", "memory_searches"],
+        tracked_metrics=["requests", "chats", "memory_searches", "costs"],
         endpoints=[
             "/v1/analytics/stats",
+            "/v1/costs",
+            "/v1/costs/daily",
+            "/v1/costs/pricing",
         ],
         retention_days=30,
     )
@@ -713,6 +736,107 @@ async def analytics_stats(days: int = 7):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Analytics error: {str(e)}",
+        )
+
+
+# =============================================================================
+# Cost Tracking Endpoints
+# =============================================================================
+
+@app.get("/v1/costs", response_model=CostSummaryResponse, tags=["costs"])
+async def get_costs(days: int = 30):
+    """
+    Get LLM usage cost summary.
+    
+    - **days**: Number of days to look back (1-365, default: 30)
+    
+    Returns cost breakdown by provider, model, and top sessions.
+    Costs are in USD.
+    """
+    try:
+        summary = analytics.cost_tracker.get_cost_summary(days=days)
+        
+        # Convert dicts to proper model instances
+        by_provider = {
+            k: ProviderCostBreakdown(**v) for k, v in summary["by_provider"].items()
+        }
+        by_model = {
+            k: ModelCostBreakdown(**v) for k, v in summary["by_model"].items()
+        }
+        top_sessions = [
+            SessionCostBreakdown(**s) for s in summary["top_sessions"]
+        ]
+        
+        return CostSummaryResponse(
+            period_days=summary["period_days"],
+            total_cost=summary["total_cost"],
+            total_input_cost=summary["total_input_cost"],
+            total_output_cost=summary["total_output_cost"],
+            total_tokens=summary["total_tokens"],
+            total_input_tokens=summary["total_input_tokens"],
+            total_output_tokens=summary["total_output_tokens"],
+            total_requests=summary["total_requests"],
+            average_cost_per_request=summary["average_cost_per_request"],
+            by_provider=by_provider,
+            by_model=by_model,
+            top_sessions=top_sessions,
+            timestamp=datetime.utcnow(),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cost summary error: {str(e)}",
+        )
+
+
+@app.get("/v1/costs/daily", response_model=DailyCostsResponse, tags=["costs"])
+async def get_daily_costs(days: int = 30):
+    """
+    Get daily cost breakdown.
+    
+    - **days**: Number of days to look back (1-365, default: 30)
+    
+    Returns cost per day for trend analysis.
+    """
+    try:
+        daily = analytics.cost_tracker.get_daily_costs(days=days)
+        return DailyCostsResponse(
+            days=days,
+            daily_costs=[DailyCostEntry(**d) for d in daily],
+            timestamp=datetime.utcnow(),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Daily costs error: {str(e)}",
+        )
+
+
+@app.get("/v1/costs/pricing", response_model=PricingResponse, tags=["costs"])
+async def get_pricing():
+    """
+    Get current pricing information for all supported models.
+    
+    Returns pricing per 1K tokens for input and output.
+    """
+    from .analytics import PRICING
+    
+    try:
+        providers = {}
+        for provider, models in PRICING.items():
+            providers[provider] = {
+                model: PricingInfo(**prices)
+                for model, prices in models.items()
+            }
+        
+        return PricingResponse(
+            providers=providers,
+            timestamp=datetime.utcnow(),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Pricing error: {str(e)}",
         )
 
 
