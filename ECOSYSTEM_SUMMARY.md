@@ -15,7 +15,7 @@
 | **Total Files** | 90+ |
 | **Total Lines of Code** | 6,000+ |
 | **Docker Services** | 10 |
-| **CLI Commands** | 25+ |
+| **CLI Commands** | 27+ (added `mc exec` and `mc containers`) |
 | **API Endpoints** | 23+ |
 | **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
@@ -123,6 +123,9 @@ mc deploy rolling   # Zero-downtime blue-green deployment
 mc deploy canary 10 # Canary deployment (10% traffic)
 mc deploy rollback  # Rollback to previous version
 mc deploy status    # Show deployment status
+mc exec mc-core "python --version"  # Execute commands in containers
+mc exec mc-core sh --shell          # Interactive shell in container
+mc containers       # List running containers
 mc logs [service]   # View logs (traefik, interface, backend, core, gateway, chroma, watchtower, all)
 mc logs --follow    # Follow logs in real-time
 mc logs status      # Show log sizes and rotation status
