@@ -5,6 +5,14 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Chat Command Security Hardening** - Enhanced security for `mc chat` command
+  - Input validation: max length (10,000 chars), line count limits, dangerous pattern detection
+  - XSS protection: blocks script tags, event handlers, javascript: URLs, data:text/html
+  - Input sanitization: removes control characters, ANSI escapes, suspicious Unicode
+  - Rate limiting: 20 messages per minute per user
+  - Sensitive data masking for audit logs
+  - New `lib/chat-security.js` module with comprehensive security utilities
+  - 55 test cases covering validation, sanitization, and risk analysis
 - **Config Command Module (`mc config`)** - Complete configuration management for CLI
   - `mc config list` — Display all configuration values with security masking
   - `mc config get <key>` — Retrieve specific values using dot notation
