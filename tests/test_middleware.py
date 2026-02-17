@@ -509,3 +509,182 @@ class TestAPIKeySecurityImprovements:
         assert response.status_code == 500
         assert "request_id" in response.json()
         assert len(response.json()["request_id"]) == 8
+
+
+# =============================================================================
+# HSTS Security Header Tests
+# =============================================================================
+
+class TestHSTSSecurityHeaders:
+    """Test HTTP Strict Transport Security (HSTS) header functionality"""
+    
+    @patch.dict('os.environ', {'ENV': 'production'}, clear=True)
+    def test_hsts_header_in_production(self):
+        """Test that HSTS header is added in production environment"""
+        app = FastAPI()
+        # Create middleware instance after env patch to pick up production
+        middleware = SecurityHeadersMiddleware(app)
+        app.add_middleware(SecurityHeadersMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        assert "Strict-Transport-Security" in response.headers
+        hsts = response.headers["Strict-Transport-Security"]
+        assert "max-age=31536000" in hsts  # Default 1 year
+        assert "includeSubDomains" in hsts
+        assert "preload" not in hsts  # Default is disabled
+    
+    @patch.dict('os.environ', {'ENV': 'development'}, clear=True)
+    def test_hsts_header_not_in_development(self):
+        """Test that HSTS header is NOT added in development environment"""
+        app = FastAPI()
+        app.add_middleware(SecurityHeadersMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        assert "Strict-Transport-Security" not in response.headers
+    
+    @patch.dict('os.environ', {
+        'ENV': 'production',
+        'HSTS_MAX_AGE': '86400',
+        'HSTS_INCLUDE_SUBDOMAINS': 'false',
+        'HSTS_PRELOAD': 'true'
+    }, clear=True)
+    def test_hsts_custom_configuration(self):
+        """Test HSTS with custom configuration values"""
+        app = FastAPI()
+        app.add_middleware(SecurityHeadersMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        hsts = response.headers["Strict-Transport-Security"]
+        assert "max-age=86400" in hsts  # Custom 1 day
+        assert "includeSubDomains" not in hsts  # Disabled
+        assert "preload" in hsts  # Enabled
+    
+    @patch.dict('os.environ', {
+        'ENV': 'production',
+        'HSTS_MAX_AGE': '63072000',  # 2 years (recommended for preload)
+        'HSTS_INCLUDE_SUBDOMAINS': 'true',
+        'HSTS_PRELOAD': 'true'
+    }, clear=True)
+    def test_hsts_preload_configuration(self):
+        """Test HSTS with preload list configuration"""
+        app = FastAPI()
+        app.add_middleware(SecurityHeadersMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        hsts = response.headers["Strict-Transport-Security"]
+        assert "max-age=63072000" in hsts
+        assert "includeSubDomains" in hsts
+        assert "preload" in hsts
+    
+    @patch.dict('os.environ', {'NODE_ENV': 'production'}, clear=True)
+    def test_hsts_with_node_env(self):
+        """Test that HSTS works with NODE_ENV as well as ENV"""
+        app = FastAPI()
+        app.add_middleware(SecurityHeadersMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        assert "Strict-Transport-Security" in response.headers
+    
+    @patch.dict('os.environ', {'ENV': 'prod'}, clear=True)
+    def test_hsts_with_prod_short_form(self):
+        """Test that HSTS works with 'prod' environment shorthand"""
+        app = FastAPI()
+        app.add_middleware(SecurityHeadersMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        assert "Strict-Transport-Security" in response.headers
+    
+    def test_other_security_headers_preserved(self):
+        """Test that other security headers are still present with HSTS"""
+        app = FastAPI()
+        app.add_middleware(SecurityHeadersMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        # All original headers should still be present
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["X-XSS-Protection"] == "1; mode=block"
+        assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+        assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+
+
+class TestSecurityHeadersMiddlewareChaining:
+    """Test that SecurityHeadersMiddleware works correctly with all other middleware"""
+    
+    @patch.dict('os.environ', {'ENV': 'production'}, clear=True)
+    def test_all_security_headers_with_all_middleware(self):
+        """Test all security headers are present with full middleware stack"""
+        app = FastAPI()
+        app.add_middleware(SecurityHeadersMiddleware)
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=100)
+        app.add_middleware(RequestLoggingMiddleware)
+        
+        @app.get("/")
+        def root():
+            return {"message": "test"}
+            
+        client = TestClient(app)
+        response = client.get("/")
+        
+        assert response.status_code == 200
+        
+        # Security headers
+        assert "Strict-Transport-Security" in response.headers
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert "X-Content-Type-Options" in response.headers
+        
+        # Rate limiting headers
+        assert "X-RateLimit-Limit" in response.headers
+        
+        # Request tracking headers
+        assert "X-Response-Time" in response.headers
+        assert "X-Request-ID" in response.headers

@@ -332,17 +332,60 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all responses"""
+    """
+    Add security headers to all responses.
+    
+    Includes HSTS (HTTP Strict Transport Security) header in production
+    environments to prevent downgrade attacks and cookie hijacking.
+    
+    HSTS Configuration (via environment variables):
+    - HSTS_MAX_AGE: Max age in seconds (default: 31536000 = 1 year)
+    - HSTS_INCLUDE_SUBDOMAINS: Include subdomains (default: true)
+    - HSTS_PRELOAD: Enable preload list inclusion (default: false)
+    """
+    
+    def __init__(self, app):
+        super().__init__(app)
+        self._init_hsts_config()
+    
+    def _init_hsts_config(self):
+        """Initialize HSTS configuration from environment variables."""
+        import os
+        
+        env = os.getenv("NODE_ENV", os.getenv("ENV", "development")).lower()
+        self.is_production = env in ("production", "prod")
+        
+        # HSTS settings (only applied in production)
+        # Default: 1 year (31536000 seconds) as recommended by security best practices
+        self.hsts_max_age = int(os.getenv("HSTS_MAX_AGE", "31536000"))
+        self.hsts_include_subdomains = os.getenv("HSTS_INCLUDE_SUBDOMAINS", "true").lower() == "true"
+        self.hsts_preload = os.getenv("HSTS_PRELOAD", "false").lower() == "true"
+    
+    def _build_hsts_header(self) -> str:
+        """Build the Strict-Transport-Security header value."""
+        parts = [f"max-age={self.hsts_max_age}"]
+        
+        if self.hsts_include_subdomains:
+            parts.append("includeSubDomains")
+        
+        if self.hsts_preload:
+            parts.append("preload")
+        
+        return "; ".join(parts)
     
     async def dispatch(self, request: Request, call_next: Callable):
         response = await call_next(request)
         
-        # Security headers
+        # Security headers (applied in all environments)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = "default-src 'self'"
+        
+        # HSTS header - only in production to prevent forcing HTTPS during local development
+        if self.is_production:
+            response.headers["Strict-Transport-Security"] = self._build_hsts_header()
         
         return response
 
