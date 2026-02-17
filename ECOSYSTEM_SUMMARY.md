@@ -15,8 +15,8 @@
 | **Total Files** | 90+ |
 | **Total Lines of Code** | 6,000+ |
 | **Docker Services** | 10 |
-| **CLI Commands** | 20+ |
-| **API Endpoints** | 20+ |
+| **CLI Commands** | 25+ |
+| **API Endpoints** | 23+ |
 | **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
 
@@ -83,11 +83,12 @@
 - `masterclaw_core/exceptions.py` - Error handling
 
 **Features:**
-- ✅ REST API with 20+ endpoints
+- ✅ REST API with 23+ endpoints
 - ✅ WebSocket for real-time chat
 - ✅ LLM routing (OpenAI, Anthropic)
 - ✅ Vector memory with semantic search
 - ✅ **Session management** (list, view, delete sessions)
+- ✅ **Cost tracking** - Per provider, model, and session cost analysis
 - ✅ Rate limiting (60 req/min)
 - ✅ Request logging
 - ✅ Security headers
@@ -110,7 +111,8 @@
 - `lib/deploy.js` - Deployment management
 - `lib/health.js` - Health monitoring commands
 - `lib/logs.js` - **Log viewing, management, export, and Loki integration**
-- `lib/restore.js` - **NEW: Disaster recovery and backup restoration**
+- `lib/restore.js` - Disaster recovery and backup restoration
+- `lib/cost.js` - **NEW: LLM cost tracking and budget monitoring**
 
 **Commands:**
 ```bash
@@ -143,6 +145,11 @@ mc doctor           # Full diagnostics
 mc chat "msg"       # Quick chat
 mc memory backup    # Backup memory
 mc memory search    # Search memories
+mc cost             # Show cost summary (last 30 days)
+mc cost summary     # Show detailed cost breakdown
+mc cost daily       # Daily cost visualization
+mc cost pricing     # Show current LLM pricing
+mc cost check -b 100 -w 80 -c 95  # Budget monitoring
 mc task list        # List tasks
 mc task add         # Add task
 mc task done        # Complete task
