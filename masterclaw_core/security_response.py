@@ -141,8 +141,10 @@ class SecurityAutoResponder:
         >>> await responder.handle_threat(threat_data)
     """
     
+    # Default paths - will fall back to relative paths if absolute paths aren't writable
     DEFAULT_BLOCKLIST_PATH = Path("/data/security/blocklist.json")
     DEFAULT_RULES_PATH = Path("/data/security/response_rules.json")
+    FALLBACK_DIR = Path("./data/security")
     
     # Default response rules
     DEFAULT_RULES = [
@@ -182,6 +184,8 @@ class SecurityAutoResponder:
         enabled: bool = True
     ):
         self.enabled = enabled and os.getenv("SECURITY_AUTO_RESPONSE", "true").lower() == "true"
+        
+        # Use provided paths or defaults with fallback logic
         self.blocklist_path = blocklist_path or self.DEFAULT_BLOCKLIST_PATH
         self.rules_path = rules_path or self.DEFAULT_RULES_PATH
         
@@ -192,16 +196,84 @@ class SecurityAutoResponder:
         
         self._cleanup_task: Optional[asyncio.Task] = None
         self._running = False
+        self._using_fallback_paths = False
+    
+    def _ensure_writable_path(self, path: Path) -> Path:
+        """
+        Ensure the path is writable, falling back to relative path if necessary.
+        
+        Args:
+            path: The desired path
+            
+        Returns:
+            A path that is guaranteed to be writable (may be the fallback path)
+        """
+        # If path is explicitly provided (not default), try to use it
+        if path != self.DEFAULT_BLOCKLIST_PATH and path != self.DEFAULT_RULES_PATH:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                # Test write permission by trying to create a test file
+                test_file = path.parent / ".write_test"
+                test_file.touch()
+                test_file.unlink()
+                return path
+            except (OSError, PermissionError) as e:
+                logger.warning(f"Cannot use provided path {path}: {e}. Falling back.")
+                # Fall through to fallback logic
+        
+        # Try the default path first
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Test write permission
+            test_file = path.parent / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+            return path
+        except (OSError, PermissionError) as e:
+            logger.warning(
+                f"Cannot write to {path.parent}: {e}. "
+                f"Falling back to {self.FALLBACK_DIR}"
+            )
+        
+        # Fall back to relative path
+        fallback_path = self.FALLBACK_DIR / path.name
+        try:
+            fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            self._using_fallback_paths = True
+            return fallback_path
+        except (OSError, PermissionError) as e:
+            # Last resort: use current working directory
+            logger.error(
+                f"Cannot create fallback directory {fallback_path.parent}: {e}. "
+                f"Using current working directory as last resort."
+            )
+            self._using_fallback_paths = True
+            return Path.cwd() / f"masterclaw_security_{path.name}"
     
     async def initialize(self):
-        """Initialize the auto-responder"""
+        """Initialize the auto-responder with graceful error handling for permissions."""
         if not self.enabled:
             logger.info("Security auto-response is disabled")
             return
         
-        # Ensure directories exist
-        self.blocklist_path.parent.mkdir(parents=True, exist_ok=True)
-        self.rules_path.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure paths are writable (with fallback if needed)
+        original_blocklist_path = self.blocklist_path
+        original_rules_path = self.rules_path
+        
+        self.blocklist_path = self._ensure_writable_path(self.blocklist_path)
+        self.rules_path = self._ensure_writable_path(self.rules_path)
+        
+        if self._using_fallback_paths:
+            logger.info(
+                f"Using fallback paths for security data: "
+                f"blocklist={self.blocklist_path}, rules={self.rules_path}"
+            )
+        
+        # Log if paths changed
+        if self.blocklist_path != original_blocklist_path:
+            logger.info(f"Blocklist path changed from {original_blocklist_path} to {self.blocklist_path}")
+        if self.rules_path != original_rules_path:
+            logger.info(f"Rules path changed from {original_rules_path} to {self.rules_path}")
         
         # Load existing blocklist
         await self._load_blocklist()
@@ -226,6 +298,9 @@ class SecurityAutoResponder:
             details={
                 "blocked_ips": len(self.blocked_ips),
                 "active_rules": len(self.rules),
+                "blocklist_path": str(self.blocklist_path),
+                "rules_path": str(self.rules_path),
+                "using_fallback_paths": self._using_fallback_paths,
             }
         )
     
@@ -268,7 +343,7 @@ class SecurityAutoResponder:
             logger.error(f"Failed to load blocklist: {e}")
     
     async def _save_blocklist(self):
-        """Save blocked IPs to disk"""
+        """Save blocked IPs to disk with graceful error handling."""
         try:
             data = {
                 "updated_at": datetime.utcnow().isoformat(),
@@ -285,8 +360,22 @@ class SecurityAutoResponder:
             
             logger.debug(f"Saved {len(self.blocked_ips)} blocks to disk")
             
+        except PermissionError as e:
+            logger.error(
+                f"Permission denied saving blocklist to {self.blocklist_path}: {e}. "
+                f"Security blocks will not persist across restarts. "
+                f"Check directory permissions or run with appropriate privileges."
+            )
+            # Don't re-raise - the system should continue to function in-memory
+        except OSError as e:
+            logger.error(
+                f"OS error saving blocklist to {self.blocklist_path}: {e}. "
+                f"Security blocks will not persist across restarts."
+            )
+            # Don't re-raise - the system should continue to function in-memory
         except Exception as e:
-            logger.error(f"Failed to save blocklist: {e}")
+            logger.exception(f"Unexpected error saving blocklist to {self.blocklist_path}")
+            # Don't re-raise - the system should continue to function in-memory
     
     async def _load_rules(self):
         """Load response rules from disk or create defaults"""
@@ -316,7 +405,7 @@ class SecurityAutoResponder:
             await self._save_rules()
     
     async def _save_rules(self):
-        """Save response rules to disk"""
+        """Save response rules to disk with graceful error handling."""
         try:
             data = {
                 "updated_at": datetime.utcnow().isoformat(),
@@ -334,11 +423,30 @@ class SecurityAutoResponder:
                 ],
             }
             
-            with open(self.rules_path, 'w') as f:
+            # Write atomically
+            temp_path = self.rules_path.with_suffix('.tmp')
+            with open(temp_path, 'w') as f:
                 json.dump(data, f, indent=2)
+            temp_path.replace(self.rules_path)
+            
+            logger.debug(f"Saved {len(self.rules)} rules to disk")
                 
+        except PermissionError as e:
+            logger.error(
+                f"Permission denied saving rules to {self.rules_path}: {e}. "
+                f"Rule changes will not persist across restarts. "
+                f"Check directory permissions or run with appropriate privileges."
+            )
+            # Don't re-raise - the system should continue to function in-memory
+        except OSError as e:
+            logger.error(
+                f"OS error saving rules to {self.rules_path}: {e}. "
+                f"Rule changes will not persist across restarts."
+            )
+            # Don't re-raise - the system should continue to function in-memory
         except Exception as e:
-            logger.error(f"Failed to save rules: {e}")
+            logger.exception(f"Unexpected error saving rules to {self.rules_path}")
+            # Don't re-raise - the system should continue to function in-memory
     
     async def _periodic_cleanup(self):
         """Periodically clean up expired blocks"""
@@ -615,7 +723,7 @@ class SecurityAutoResponder:
         self._alert_handlers.append(handler)
     
     def get_stats(self) -> dict:
-        """Get current auto-responder statistics"""
+        """Get current auto-responder statistics with path information."""
         now = datetime.utcnow()
         active_blocks = [
             b for b in self.blocked_ips.values() if not b.is_expired()
@@ -637,6 +745,11 @@ class SecurityAutoResponder:
                 (b.blocked_at for b in active_blocks),
                 default=None
             ),
+            "paths": {
+                "blocklist": str(self.blocklist_path),
+                "rules": str(self.rules_path),
+                "using_fallback": self._using_fallback_paths,
+            }
         }
     
     def list_blocked_ips(self) -> List[BlockedIP]:

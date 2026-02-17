@@ -213,6 +213,85 @@ class TestSecurityAutoResponderInitialization:
             data = json.load(f)
             assert len(data["blocked_ips"]) == 1
 
+    @pytest.mark.asyncio
+    async def test_initialize_fallback_paths_on_permission_error(self, tmp_path):
+        """Test that initialization falls back to alternate paths on permission errors."""
+        # Create paths that look like the default absolute paths but will fail
+        unreadable_dir = tmp_path / "unreadable"
+        unreadable_dir.mkdir()
+        
+        # Make directory unreadable/unwritable
+        unreadable_dir.chmod(0o000)
+        
+        try:
+            blocklist_path = unreadable_dir / "blocklist.json"
+            rules_path = unreadable_dir / "rules.json"
+            
+            responder = SecurityAutoResponder(
+                blocklist_path=blocklist_path,
+                rules_path=rules_path,
+                enabled=True
+            )
+            
+            await responder.initialize()
+            
+            # Verify it fell back to a different path
+            assert responder.blocklist_path != blocklist_path
+            assert responder.rules_path != rules_path
+            assert responder._using_fallback_paths is True
+            
+            # Verify the system still works
+            await responder.block_ip("192.168.1.100", BlockReason.BRUTE_FORCE)
+            assert responder.is_ip_blocked("192.168.1.100")
+            
+            await responder.shutdown()
+        finally:
+            # Restore permissions for cleanup
+            unreadable_dir.chmod(0o755)
+    
+    @pytest.mark.asyncio
+    async def test_save_blocklist_handles_permission_error(self, tmp_path, caplog):
+        """Test that _save_blocklist handles permission errors gracefully."""
+        import logging
+        
+        blocklist_path = tmp_path / "blocklist.json"
+        rules_path = tmp_path / "rules.json"
+        
+        responder = SecurityAutoResponder(
+            blocklist_path=blocklist_path,
+            rules_path=rules_path,
+            enabled=True
+        )
+        await responder.initialize()
+        
+        # Block an IP to ensure there's data to save
+        await responder.block_ip("192.168.1.100", BlockReason.BRUTE_FORCE)
+        
+        # Make directory read-only
+        tmp_path.chmod(0o555)
+        
+        try:
+            with caplog.at_level(logging.ERROR):
+                await responder._save_blocklist()
+            
+            # Verify error was logged but no exception was raised
+            assert "Permission denied" in caplog.text or "OS error" in caplog.text
+        finally:
+            # Restore permissions for cleanup
+            tmp_path.chmod(0o755)
+            await responder.shutdown()
+    
+    @pytest.mark.asyncio
+    async def test_get_stats_includes_path_info(self, initialized_responder):
+        """Test that get_stats includes path information."""
+        stats = initialized_responder.get_stats()
+        
+        assert "paths" in stats
+        assert "blocklist" in stats["paths"]
+        assert "rules" in stats["paths"]
+        assert "using_fallback" in stats["paths"]
+        assert isinstance(stats["paths"]["using_fallback"], bool)
+
 
 class TestIPBlocking:
     """Test IP blocking functionality"""
