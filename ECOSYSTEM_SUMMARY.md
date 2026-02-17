@@ -84,6 +84,7 @@
 
 **Features:**
 - ✅ REST API with 23+ endpoints
+- ✅ **Interactive API documentation** (Swagger UI + ReDoc + OpenAPI schema)
 - ✅ WebSocket for real-time chat
 - ✅ LLM routing (OpenAI, Anthropic)
 - ✅ Vector memory with semantic search
