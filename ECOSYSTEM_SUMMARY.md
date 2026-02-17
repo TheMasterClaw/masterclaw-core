@@ -15,7 +15,7 @@
 | **Total Files** | 90+ |
 | **Total Lines of Code** | 6,000+ |
 | **Docker Services** | 10 |
-| **CLI Commands** | 31+ (added `mc benchmark`, `mc exec`, `mc containers`) |
+| **CLI Commands** | 34+ (added `mc smoke-test`) |
 | **API Endpoints** | 23+ |
 | **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
@@ -118,6 +118,8 @@
 **Commands:**
 ```bash
 mc validate         # Pre-flight environment validation
+mc smoke-test       # Post-deployment API verification tests
+mc smoke-test --quick  # Quick smoke test (critical endpoints only)
 mc status           # Check health
 mc status --watch   # Continuous monitoring
 mc deploy rolling   # Zero-downtime blue-green deployment
