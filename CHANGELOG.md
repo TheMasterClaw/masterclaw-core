@@ -5,6 +5,12 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Security Auto-Responder Path Fallback** - Improved error handling for file system operations
+  - Automatic fallback to alternate paths when default paths aren't writable
+  - Graceful handling of permission errors with informative logging
+  - Path information included in statistics for better observability
+  - System continues to function in-memory when persistence fails
+  - New tests for permission error scenarios
 - **Batch Memory Import/Export API** - Efficient bulk memory operations
   - `POST /v1/memory/batch` - Import up to 1000 memories in a single request
     - Skip duplicate detection based on content hash
@@ -52,6 +58,10 @@ All notable changes to MasterClaw Core will be documented in this file.
 - Updated root endpoint (`/`) to include new WebSocket and Analytics endpoints
 - Chat and memory endpoints now track analytics automatically
 - Enhanced API metadata with detailed descriptions and authentication info
+- **Security**: Improved `security_response.py` with graceful file permission error handling
+  - Added `_ensure_writable_path()` method with automatic fallback logic
+  - Enhanced `_save_blocklist()` and `_save_rules()` with specific error handling
+  - Updated `get_stats()` to include path information for debugging
 
 ## [0.1.0] - 2026-02-13
 
