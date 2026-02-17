@@ -15,7 +15,7 @@
 | **Total Files** | 90+ |
 | **Total Lines of Code** | 6,000+ |
 | **Docker Services** | 10 |
-| **CLI Commands** | 27+ (added `mc exec` and `mc containers`) |
+| **CLI Commands** | 31+ (added `mc benchmark`, `mc exec`, `mc containers`) |
 | **API Endpoints** | 23+ |
 | **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
@@ -113,6 +113,7 @@
 - `lib/logs.js` - **Log viewing, management, export, and Loki integration**
 - `lib/restore.js` - Disaster recovery and backup restoration
 - `lib/cost.js` - **NEW: LLM cost tracking and budget monitoring**
+- `lib/benchmark.js` - **NEW: Performance benchmarking and regression detection**
 
 **Commands:**
 ```bash
@@ -153,6 +154,10 @@ mc cost summary     # Show detailed cost breakdown
 mc cost daily       # Daily cost visualization
 mc cost pricing     # Show current LLM pricing
 mc cost check -b 100 -w 80 -c 95  # Budget monitoring
+mc benchmark        # Run performance benchmarks
+mc benchmark-history    # View benchmark history
+mc benchmark-compare    # Compare benchmark runs
+mc benchmark-export     # Export benchmark data
 mc task list        # List tasks
 mc task add         # Add task
 mc task done        # Complete task
