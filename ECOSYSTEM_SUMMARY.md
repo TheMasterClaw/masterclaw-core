@@ -38,6 +38,7 @@
 - `scripts/restore.sh` - Disaster recovery
 - `scripts/health-check.sh` - Service monitoring
 - `scripts/ssl-cert-check.sh` - SSL certificate expiration monitoring
+- `scripts/schedule-backup-verify.sh` - Automated backup verification scheduling
 - `scripts/test.sh` - Test suite runner
 - `scripts/migrate.sh` - Database migrations
 - `monitoring/prometheus.yml` - Metrics collection
@@ -50,6 +51,7 @@
 - ✅ **Zero-downtime blue-green deployment** with automatic rollback
 - ✅ Canary deployment support (gradual traffic shifting)
 - ✅ **SSL certificate expiration monitoring** (14-day warning, 7-day critical)
+- ✅ **Automated backup verification** (scheduled verification with notifications)
 - ✅ Monitoring with Prometheus + Grafana + **Loki**
 - ✅ Centralized log aggregation with 30-day retention
 - ✅ Automated backups with rotation
@@ -139,6 +141,11 @@ mc logs search      # Search for patterns in logs
 mc logs query       # Query logs via Loki aggregation (requires monitoring stack)
 mc logs query --errors --since 24h  # Error logs from last 24h
 mc backup           # Create backup
+mc backup-verify    # Verify backup integrity
+mc backup-verify schedule install    # Schedule weekly verification
+mc backup-verify schedule status     # Check schedule status
+mc backup-verify schedule run-now    # Test verification now
+mc backup-verify schedule log        # View verification logs
 mc restore          # List backups for restore
 mc restore list     # List available backups
 mc restore preview  # Preview backup contents
