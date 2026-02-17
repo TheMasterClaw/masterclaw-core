@@ -16,6 +16,23 @@ cp .env.example .env
 python -m masterclaw_core
 ```
 
+## API Documentation 📚
+
+MasterClaw Core provides interactive API documentation:
+
+| Documentation | URL | Description |
+|---------------|-----|-------------|
+| **Swagger UI** | `http://localhost:8000/docs` | Interactive API explorer with "Try it out" feature |
+| **ReDoc** | `http://localhost:8000/redoc` | Clean, responsive API reference documentation |
+| **OpenAPI Schema** | `http://localhost:8000/openapi.json` | Raw OpenAPI 3.0 specification |
+
+### Using Swagger UI
+
+1. Navigate to `http://localhost:8000/docs`
+2. Browse available endpoints by category
+3. Click "Try it out" to test endpoints directly from the browser
+4. View request/response schemas and example payloads
+
 ## API Endpoints
 
 ### Health

@@ -112,12 +112,39 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 MasterClaw Core shutting down...")
 
 
-# Create FastAPI app
+# Create FastAPI app with interactive API documentation
 app = FastAPI(
     title="MasterClaw Core",
-    description="The AI brain behind MasterClaw",
+    description="""
+    The AI brain behind MasterClaw — LLM integrations, memory systems, and agent orchestration.
+
+    ## Features
+
+    - **Chat**: Send messages to AI with memory context
+    - **Memory**: Semantic search and storage with ChromaDB
+    - **Sessions**: Manage conversation sessions
+    - **Analytics**: Cost tracking and usage statistics
+    - **Streaming**: Real-time WebSocket chat
+
+    ## Authentication
+
+    API endpoints require a valid API key passed in the `X-API-Key` header.
+    """,
     version=__version__,
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    openapi_tags=[
+        {"name": "root", "description": "Root and health endpoints"},
+        {"name": "health", "description": "Health and security checks"},
+        {"name": "monitoring", "description": "Prometheus metrics and monitoring"},
+        {"name": "chat", "description": "AI chat and conversation"},
+        {"name": "memory", "description": "Memory storage and semantic search"},
+        {"name": "sessions", "description": "Session management"},
+        {"name": "analytics", "description": "Usage analytics and statistics"},
+        {"name": "costs", "description": "LLM cost tracking and pricing"},
+    ],
 )
 
 # Register exception handlers
@@ -149,11 +176,16 @@ app.add_middleware(
 
 @app.get("/", tags=["root"])
 async def root():
-    """Root endpoint"""
+    """Root endpoint with API documentation links"""
     return {
         "name": "MasterClaw Core",
         "version": __version__,
         "status": "running",
+        "documentation": {
+            "swagger_ui": "/docs",
+            "redoc": "/redoc",
+            "openapi_schema": "/openapi.json",
+        },
         "endpoints": [
             "/health",
             "/health/security",

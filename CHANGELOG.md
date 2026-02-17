@@ -5,6 +5,12 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Interactive API Documentation** - Auto-generated docs with Swagger UI and ReDoc
+  - Swagger UI at `/docs` - Interactive API explorer with "Try it out" feature
+  - ReDoc at `/redoc` - Clean, responsive API reference documentation  
+  - OpenAPI 3.0 schema at `/openapi.json` - Machine-readable specification
+  - Categorized endpoints with descriptions for better navigation
+  - Enhanced root endpoint (`/`) with documentation URLs
 - **Analytics API Endpoints** - Expose usage metrics and statistics
   - `GET /v1/analytics` - Analytics system summary and available metrics
   - `GET/POST /v1/analytics/stats` - Usage statistics (requests, chats, tokens, error rates)
@@ -23,6 +29,7 @@ All notable changes to MasterClaw Core will be documented in this file.
 ### Changed
 - Updated root endpoint (`/`) to include new WebSocket and Analytics endpoints
 - Chat and memory endpoints now track analytics automatically
+- Enhanced API metadata with detailed descriptions and authentication info
 
 ## [0.1.0] - 2026-02-13
 
