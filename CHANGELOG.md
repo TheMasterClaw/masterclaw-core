@@ -4,6 +4,24 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Security Hardening & Reliability Improvements
+- **Performance Module Security Enhancements** (`lib/performance.js`)
+  - **Input validation** for all numeric parameters (`n`, `limit`) with DoS protection
+    - Bounds checking prevents excessive values (max 100 endpoints, 1000 profiles)
+    - Safe integer validation prevents integer overflow attacks
+    - Type coercion with validation for string inputs
+  - **Correlation ID integration** for distributed tracing across API calls
+    - Automatic propagation via `x-correlation-id` HTTP header
+    - Enables end-to-end request tracing through the Core API
+  - **Exponential backoff retry logic** for resilient API communication
+    - 3 retries with configurable initial delay (500ms) and max delay (5s)
+    - Jitter (±25%) prevents thundering herd on service recovery
+    - Only retries transient errors (network, 502/503/504/429 status codes)
+  - **Response size limiting** (1MB max) prevents memory exhaustion attacks
+  - **Timeout hardening** with configurable bounds (1s min, 60s max)
+  - **Sensitive data masking** in all error messages
+  - **Comprehensive test coverage** - 56 test cases covering security, validation, retries, and error handling
+
 ### Added
 - **API Performance Profiling** - Comprehensive endpoint performance monitoring and analysis
   - New `PerformanceProfilingMiddleware` tracks request duration per endpoint

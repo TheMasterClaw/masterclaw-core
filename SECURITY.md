@@ -115,6 +115,31 @@ Distributed tracing via correlation IDs:
 4. **Audit security events**: Log security violations with `logSecurityViolation()`
 5. **Test security features**: Add tests for security validation in `tests/*.security.test.js`
 
+### Performance Module Security
+
+The `mc performance` command implements comprehensive security hardening:
+
+**Input Validation:**
+- All numeric parameters (`n`, `limit`) are validated and bounded
+- Maximum limits prevent DoS (100 endpoints, 1000 profiles)
+- Safe integer validation prevents overflow attacks
+- String inputs are parsed with validation
+
+**Retry Logic with Exponential Backoff:**
+- Prevents thundering herd with jitter (±25%)
+- Only retries transient errors (network, 5xx, 429)
+- Bounded delays prevent resource exhaustion
+
+**Correlation ID Propagation:**
+- Distributed tracing via `x-correlation-id` header
+- Enables request tracking across services
+- Automatic integration with existing correlation system
+
+**Response Safety:**
+- Maximum response size (1MB) prevents memory exhaustion
+- Configurable timeout bounds (1s - 60s)
+- Sensitive data masking in error messages
+
 ## Security Testing
 
 Run the security-focused test suite:
