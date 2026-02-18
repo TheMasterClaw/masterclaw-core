@@ -230,6 +230,7 @@ app = FastAPI(
         {"name": "costs", "description": "LLM cost tracking and pricing"},
         {"name": "tools", "description": "Tool use framework - GitHub, system, weather"},
         {"name": "context", "description": "Rex-deus context access - projects, goals, people, knowledge, preferences"},
+        {"name": "cache", "description": "Redis caching layer - statistics, health, and cache management"},
         {"name": "webhooks", "description": "GitHub webhook integration for CI/CD automation"},
     ],
 )
@@ -333,6 +334,9 @@ async def root():
             "/v1/context/preferences (NEW)",
             "/v1/context/search (NEW)",
             "/v1/context/summary (NEW)",
+            "/cache/stats (NEW)",
+            "/cache/health (NEW)",
+            "/cache/clear (NEW)",
             "/webhooks/github (NEW)",
             "/webhooks/github/config (NEW)",
         ],
@@ -2603,3 +2607,89 @@ async def handle_github_webhook(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process webhook: {str(e)}"
         )
+
+
+# =============================================================================
+# Cache Endpoints
+# =============================================================================
+
+from .cache import cache, LLMCache, EmbeddingCache, RateLimitCache
+from pydantic import BaseModel
+
+class CacheStatsResponse(BaseModel):
+    enabled: bool
+    redis_connected: bool
+    key_prefix: str
+    memory_keys: int
+    redis_version: Optional[str] = None
+    used_memory_human: Optional[str] = None
+    total_keys: Optional[int] = None
+    hit_rate: Optional[float] = None
+
+class CacheClearRequest(BaseModel):
+    pattern: Optional[str] = None
+    confirm: bool = False
+
+class CacheClearResponse(BaseModel):
+    success: bool
+    keys_cleared: int
+    pattern: Optional[str] = None
+
+class CacheHealthResponse(BaseModel):
+    status: str
+    enabled: bool
+    backend: str
+    latency_ms: Optional[float] = None
+    redis_error: Optional[str] = None
+
+
+@app.get("/cache/stats", response_model=CacheStatsResponse, tags=["cache"])
+async def get_cache_stats():
+    """
+    Get cache statistics.
+
+    Returns information about the caching layer including:
+    - Redis connection status
+    - Memory usage
+    - Cache hit rate
+    - Total keys stored
+    """
+    stats = cache.get_stats()
+    return CacheStatsResponse(**stats)
+
+
+@app.get("/cache/health", response_model=CacheHealthResponse, tags=["cache"])
+async def get_cache_health():
+    """
+    Check cache health.
+
+    Returns the health status of the caching layer.
+    """
+    health = cache.health_check()
+    return CacheHealthResponse(**health)
+
+
+@app.post("/cache/clear", response_model=CacheClearResponse, tags=["cache"])
+async def clear_cache(request: CacheClearRequest):
+    """
+    Clear cache entries.
+
+    - **pattern**: Optional pattern to match keys (e.g., "llm:*" for LLM cache)
+    - **confirm**: Must be set to True to confirm deletion
+
+    Use with caution - this will delete cached data.
+    """
+    if not request.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirm must be True to clear cache"
+        )
+
+    count = cache.clear(request.pattern)
+    logger.info(f"Cache cleared: {count} keys removed", pattern=request.pattern)
+
+    return CacheClearResponse(
+        success=True,
+        keys_cleared=count,
+        pattern=request.pattern
+    )

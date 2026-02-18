@@ -30,8 +30,20 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_DIR: str = "./data/chroma"
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     
+    # Redis Configuration
+    REDIS_ENABLED: bool = True
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_KEY_PREFIX: str = "masterclaw"
+    CACHE_TTL: int = 3600  # 1 hour default
+    LLM_CACHE_ENABLED: bool = True
+    LLM_CACHE_TTL: int = 86400  # 24 hours
+    EMBEDDING_CACHE_ENABLED: bool = True
+    EMBEDDING_CACHE_TTL: int = 604800  # 7 days
+    RATE_LIMIT_REDIS_ENABLED: bool = True
+    
     # Session Configuration
     SESSION_TIMEOUT: int = 3600  # 1 hour
+    SESSION_BACKEND: str = "redis"  # redis, memory
     
     @field_validator("PORT")
     @classmethod
