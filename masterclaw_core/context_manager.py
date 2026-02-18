@@ -17,6 +17,8 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
+from .security import validate_file_path, sanitize_path_for_display
+
 logger = logging.getLogger("masterclaw.context")
 
 
@@ -169,8 +171,46 @@ class ContextManager:
         return pairs
     
     def _read_file(self, filename: str) -> Optional[str]:
-        """Read a context file, returning None if not found"""
+        """
+        Read a context file, returning None if not found.
+        
+        Security: Validates the filename to prevent path traversal attacks.
+        All file access is constrained to the context_dir directory.
+        """
+        # Validate filename to prevent path traversal attacks
+        is_valid, error = validate_file_path(
+            filename,
+            allow_absolute=False,
+            base_directory=str(self.context_dir)
+        )
+        
+        if not is_valid:
+            sanitized = sanitize_path_for_display(filename)
+            logger.warning(
+                f"Security: Blocked attempt to read file with invalid path: {sanitized}. "
+                f"Reason: {error}"
+            )
+            return None
+        
+        # Use the validated filename (normalized by validate_file_path)
         filepath = self.context_dir / filename
+        
+        # Double-check the resolved path is within context_dir
+        try:
+            resolved_path = filepath.resolve()
+            resolved_context_dir = self.context_dir.resolve()
+            
+            # Ensure the resolved path starts with the context directory
+            if not str(resolved_path).startswith(str(resolved_context_dir)):
+                logger.warning(
+                    f"Security: Path traversal attempt blocked - "
+                    f"resolved path {resolved_path} escapes context directory"
+                )
+                return None
+        except (OSError, ValueError) as e:
+            logger.error(f"Error resolving file path: {e}")
+            return None
+        
         try:
             return filepath.read_text(encoding='utf-8')
         except FileNotFoundError:
