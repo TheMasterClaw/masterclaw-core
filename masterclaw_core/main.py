@@ -1,5 +1,6 @@
 """Main FastAPI application for MasterClaw Core"""
 
+import asyncio
 import logging
 import sys
 import time
@@ -80,6 +81,7 @@ from .security_response import (
     shutdown_auto_responder,
 )
 from .tasks import task_queue
+from .health_history import health_history, HealthRecord
 
 # Configure structured logging
 logging.basicConfig(
@@ -141,10 +143,35 @@ async def lifespan(app: FastAPI):
     await task_queue.start()
     logger.info(f"✅ Task queue started ({task_queue.max_workers} workers)")
 
+    # Start health history cleanup scheduler
+    async def cleanup_scheduler():
+        """Periodically clean up old health history records"""
+        while True:
+            try:
+                await asyncio.sleep(86400)  # Run daily
+                deleted = health_history.cleanup_old_records(days=30)
+                logger.info(f"🧹 Health history cleanup: removed {deleted} old records")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Health history cleanup error: {e}")
+                await asyncio.sleep(3600)  # Retry in 1 hour on error
+
+    cleanup_task = asyncio.create_task(cleanup_scheduler())
+    logger.info("✅ Health history cleanup scheduler started")
+
     yield
 
     # Shutdown
     logger.info("🛑 MasterClaw Core shutting down...")
+
+    # Cancel cleanup scheduler
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("✅ Health history cleanup scheduler stopped")
 
     # Shutdown task queue gracefully
     await task_queue.stop()
@@ -180,7 +207,7 @@ app = FastAPI(
     openapi_url="/openapi.json",
     openapi_tags=[
         {"name": "root", "description": "Root and health endpoints"},
-        {"name": "health", "description": "Health, security, and system information"},
+        {"name": "health", "description": "Health checks, security, system info, and health history tracking"},
         {"name": "security", "description": "Security management - IP blocking and auto-response"},
         {"name": "monitoring", "description": "Prometheus metrics and monitoring"},
         {"name": "chat", "description": "AI chat and conversation"},
@@ -189,6 +216,7 @@ app = FastAPI(
         {"name": "analytics", "description": "Usage analytics and statistics"},
         {"name": "costs", "description": "LLM cost tracking and pricing"},
         {"name": "tools", "description": "Tool use framework - GitHub, system, weather"},
+        {"name": "context", "description": "Rex-deus context access - projects, goals, people, knowledge, preferences"},
     ],
 )
 
@@ -236,6 +264,9 @@ async def root():
         "endpoints": [
             "/health",
             "/health/security",
+            "/health/history",
+            "/health/history/summary",
+            "/health/history/uptime",
             "/info",
             "/metrics",
             "/v1/chat",
@@ -259,6 +290,13 @@ async def root():
             "/v1/tools/{tool_name}",
             "/v1/tools/execute",
             "/v1/tools/definitions/openai",
+            "/v1/context/projects (NEW)",
+            "/v1/context/goals (NEW)",
+            "/v1/context/people (NEW)",
+            "/v1/context/knowledge (NEW)",
+            "/v1/context/preferences (NEW)",
+            "/v1/context/search (NEW)",
+            "/v1/context/summary (NEW)",
         ],
     }
 
@@ -309,6 +347,159 @@ async def security_health_check():
 
     status_code = 200 if report["secure"] else 503
     return JSONResponse(content=safe_report, status_code=status_code)
+
+
+# =============================================================================
+# Health History Endpoints
+# =============================================================================
+
+@app.get("/health/history", tags=["health"])
+async def get_health_history(
+    component: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """
+    Retrieve health check history over time.
+
+    Query parameters:
+    - **component**: Filter by component name (e.g., "memory_store", "llm_openai", "overall")
+    - **since**: ISO timestamp for start of range
+    - **until**: ISO timestamp for end of range
+    - **status**: Filter by status ("healthy", "degraded", "unhealthy")
+    - **limit**: Maximum records to return (default: 100, max: 1000)
+    - **offset**: Pagination offset
+
+    Returns historical health records for debugging intermittent issues
+    and monitoring service reliability.
+    """
+    # Parse timestamps
+    since_dt = None
+    until_dt = None
+
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid 'since' timestamp format")
+
+    if until:
+        try:
+            until_dt = datetime.fromisoformat(until.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid 'until' timestamp format")
+
+    # Clamp limit
+    limit = min(max(limit, 1), 1000)
+
+    records = health_history.get_history(
+        component=component,
+        since=since_dt,
+        until=until_dt,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "records": [r.to_dict() for r in records],
+        "count": len(records),
+        "filters": {
+            "component": component,
+            "since": since,
+            "until": until,
+            "status": status,
+        },
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+        },
+    }
+
+
+@app.get("/health/history/summary", tags=["health"])
+async def get_health_summary(
+    since: Optional[str] = None,
+    component: Optional[str] = None,
+):
+    """
+    Get a summary of health status over time.
+
+    Returns aggregated statistics including:
+    - Total checks per component
+    - Status breakdown (healthy/degraded/unhealthy)
+    - Average response times
+    - Availability percentage
+
+    Useful for dashboards and SLO monitoring.
+    """
+    since_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid 'since' timestamp format")
+    else:
+        # Default to last 24 hours
+        since_dt = datetime.utcnow() - timedelta(hours=24)
+
+    summary = health_history.get_summary(since=since_dt, component=component)
+
+    return summary
+
+
+@app.get("/health/history/uptime", tags=["health"])
+async def get_uptime_stats(
+    component: str = "overall",
+    since: Optional[str] = None,
+):
+    """
+    Calculate uptime statistics for a specific component.
+
+    Returns:
+    - Uptime percentage
+    - Number of outages
+    - Outage durations
+    - Current status
+
+    Useful for SLA reporting and reliability analysis.
+    """
+    since_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid 'since' timestamp format")
+
+    stats = health_history.get_uptime_stats(component=component, since=since_dt)
+
+    return stats
+
+
+@app.post("/health/history/record", tags=["health"])
+async def record_health_check(record: Dict[str, Any]):
+    """
+    Manually record a health check result.
+
+    This endpoint allows external health checks or monitoring systems
+    to record their own health status into the history.
+    """
+    try:
+        health_record = HealthRecord(
+            timestamp=datetime.utcnow(),
+            status=record.get("status", "unknown"),
+            component=record.get("component", "external"),
+            response_time_ms=record.get("response_time_ms"),
+            details=record.get("details"),
+            error=record.get("error"),
+        )
+        health_history.record(health_record)
+        return {"status": "recorded"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to record health check: {str(e)}")
 
 
 @app.get("/info", response_model=SystemInfoResponse, tags=["health"])
@@ -488,6 +679,28 @@ async def system_info(http_request: Request):
     # Track metrics
     duration_ms = (time.time() - start_time) * 1000
     prom_metrics.track_request("GET", "/info", 200, duration_ms)
+
+    # Record health history for each component
+    try:
+        for comp in components:
+            health_history.record(HealthRecord(
+                timestamp=datetime.utcnow(),
+                status=comp.status,
+                component=comp.name,
+                response_time_ms=comp.response_time_ms,
+                details=comp.details,
+            ))
+        # Also record overall health
+        health_history.record(HealthRecord(
+            timestamp=datetime.utcnow(),
+            status=overall_health,
+            component="overall",
+            response_time_ms=duration_ms,
+            details=f"Info endpoint completed in {duration_ms:.2f}ms",
+        ))
+    except Exception as e:
+        # Don't fail the request if history recording fails
+        logger.warning(f"Failed to record health history: {e}")
 
     return response
 
@@ -1856,3 +2069,302 @@ async def get_openai_tool_definitions():
         "tools": tool_registry.get_definitions(),
         "count": len(tool_registry.list_tools()),
     }
+
+
+# =============================================================================
+# Context API Endpoints (rex-deus integration)
+# =============================================================================
+
+from .context_manager import get_context_manager
+
+@app.get("/v1/context/projects", tags=["context"])
+async def get_context_projects(
+    status: Optional[str] = None,
+    priority: Optional[str] = None
+):
+    """
+    Get projects from rex-deus context.
+
+    Returns projects defined in rex-deus/projects.md with optional filtering.
+
+    Query parameters:
+    - **status**: Filter by status (active, paused, completed, archived)
+    - **priority**: Filter by priority (critical, high, medium, low)
+
+    **Example:**
+    ```
+    GET /v1/context/projects?status=active&priority=high
+    ```
+    """
+    try:
+        ctx = get_context_manager()
+        projects = ctx.get_projects()
+
+        # Apply filters
+        if status:
+            projects = [p for p in projects if p.status.lower() == status.lower()]
+        if priority:
+            projects = [p for p in projects if p.priority.lower() == priority.lower()]
+
+        return {
+            "projects": [{
+                "name": p.name,
+                "status": p.status,
+                "priority": p.priority,
+                "description": p.description,
+                "tags": p.tags,
+                "urls": p.urls,
+                "updated_at": p.updated_at
+            } for p in projects],
+            "count": len(projects)
+        }
+    except Exception as e:
+        logger.error(f"Error loading projects context: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load projects context"
+        )
+
+
+@app.get("/v1/context/goals", tags=["context"])
+async def get_context_goals(
+    status: Optional[str] = None,
+    priority: Optional[str] = None
+):
+    """
+    Get goals from rex-deus context.
+
+    Returns goals defined in rex-deus/goals.md with optional filtering.
+
+    Query parameters:
+    - **status**: Filter by status (active, completed, deferred)
+    - **priority**: Filter by priority (critical, high, medium, low)
+    """
+    try:
+        ctx = get_context_manager()
+        goals = ctx.get_goals()
+
+        # Apply filters
+        if status:
+            goals = [g for g in goals if g.status.lower() == status.lower()]
+        if priority:
+            goals = [g for g in goals if g.priority.lower() == priority.lower()]
+
+        return {
+            "goals": [{
+                "title": g.title,
+                "status": g.status,
+                "priority": g.priority,
+                "description": g.description,
+                "target_date": g.target_date,
+                "completed_at": g.completed_at
+            } for g in goals],
+            "count": len(goals)
+        }
+    except Exception as e:
+        logger.error(f"Error loading goals context: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load goals context"
+        )
+
+
+@app.get("/v1/context/people", tags=["context"])
+async def get_context_people(
+    role: Optional[str] = None,
+    relationship: Optional[str] = None
+):
+    """
+    Get people from rex-deus context.
+
+    Returns people defined in rex-deus/people.md with optional filtering.
+
+    Query parameters:
+    - **role**: Filter by role (developer, designer, etc.)
+    - **relationship**: Filter by relationship (friend, colleague, client, etc.)
+    """
+    try:
+        ctx = get_context_manager()
+        people = ctx.get_people()
+
+        # Apply filters
+        if role:
+            people = [p for p in people if role.lower() in p.role.lower()]
+        if relationship:
+            people = [p for p in people if relationship.lower() in p.relationship.lower()]
+
+        return {
+            "people": [{
+                "name": p.name,
+                "role": p.role,
+                "relationship": p.relationship,
+                "notes": p.notes,
+                "contact": p.contact,
+                "tags": p.tags
+            } for p in people],
+            "count": len(people)
+        }
+    except Exception as e:
+        logger.error(f"Error loading people context: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load people context"
+        )
+
+
+@app.get("/v1/context/knowledge", tags=["context"])
+async def get_context_knowledge(
+    category: Optional[str] = None,
+    confidence: Optional[str] = None
+):
+    """
+    Get knowledge entries from rex-deus context.
+
+    Returns knowledge entries defined in rex-deus/knowledge.md with optional filtering.
+
+    Query parameters:
+    - **category**: Filter by category
+    - **confidence**: Filter by confidence level (high, medium, low)
+    """
+    try:
+        ctx = get_context_manager()
+        knowledge = ctx.get_knowledge()
+
+        # Apply filters
+        if category:
+            knowledge = [k for k in knowledge if category.lower() in k.category.lower()]
+        if confidence:
+            knowledge = [k for k in knowledge if k.confidence.lower() == confidence.lower()]
+
+        return {
+            "knowledge": [{
+                "category": k.category,
+                "topic": k.topic,
+                "content": k.content,
+                "confidence": k.confidence,
+                "source": k.source,
+                "updated_at": k.updated_at
+            } for k in knowledge],
+            "count": len(knowledge)
+        }
+    except Exception as e:
+        logger.error(f"Error loading knowledge context: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load knowledge context"
+        )
+
+
+@app.get("/v1/context/preferences", tags=["context"])
+async def get_context_preferences(
+    category: Optional[str] = None,
+    priority: Optional[str] = None
+):
+    """
+    Get preferences from rex-deus context.
+
+    Returns preferences defined in rex-deus/preferences.md with optional filtering.
+
+    Query parameters:
+    - **category**: Filter by category (Communication, Technical, etc.)
+    - **priority**: Filter by priority (required, preferred, optional)
+    """
+    try:
+        ctx = get_context_manager()
+        preferences = ctx.get_preferences()
+
+        # Apply filters
+        if category:
+            preferences = [p for p in preferences if category.lower() in p.category.lower()]
+        if priority:
+            preferences = [p for p in preferences if p.priority.lower() == priority.lower()]
+
+        return {
+            "preferences": [{
+                "category": p.category,
+                "item": p.item,
+                "value": p.value,
+                "priority": p.priority
+            } for p in preferences],
+            "count": len(preferences)
+        }
+    except Exception as e:
+        logger.error(f"Error loading preferences context: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load preferences context"
+        )
+
+
+@app.get("/v1/context/search", tags=["context"])
+async def search_context(query: str):
+    """
+    Search across all rex-deus context files.
+
+    Performs a case-insensitive search across projects, goals, people,
+    knowledge, and preferences.
+
+    Query parameters:
+    - **query**: Search string (required)
+
+    Returns matching items from all context categories.
+    """
+    if not query or len(query.strip()) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query must be at least 2 characters"
+        )
+
+    try:
+        ctx = get_context_manager()
+        results = ctx.query_context(query)
+
+        return {
+            "query": query,
+            "results": {
+                "projects": [{"name": p.name, "status": p.status, "priority": p.priority}
+                            for p in results["projects"]],
+                "goals": [{"title": g.title, "status": g.status}
+                         for g in results["goals"]],
+                "people": [{"name": p.name, "role": p.role}
+                          for p in results["people"]],
+                "knowledge": [{"category": k.category, "topic": k.topic}
+                             for k in results["knowledge"]],
+                "preferences": [{"category": p.category, "item": p.item}
+                               for p in results["preferences"]]
+            },
+            "total_matches": (
+                len(results["projects"]) +
+                len(results["goals"]) +
+                len(results["people"]) +
+                len(results["knowledge"]) +
+                len(results["preferences"])
+            )
+        }
+    except Exception as e:
+        logger.error(f"Error searching context: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to search context"
+        )
+
+
+@app.get("/v1/context/summary", tags=["context"])
+async def get_context_summary():
+    """
+    Get a summary of all rex-deus context.
+
+    Returns high-level summary including counts, active items,
+    and priority breakdowns.
+    """
+    try:
+        ctx = get_context_manager()
+        summary = ctx.get_summary()
+
+        return summary
+    except Exception as e:
+        logger.error(f"Error loading context summary: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load context summary"
+        )

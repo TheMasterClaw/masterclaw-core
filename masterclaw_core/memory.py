@@ -93,9 +93,9 @@ class ChromaBackend(MemoryBackend):
     async def add(self, entry: MemoryEntry) -> str:
         """Add a memory entry with error handling"""
         try:
-            memory_id = entry.id or hashlib.md5(
+            memory_id = entry.id or hashlib.sha256(
                 f"{entry.content}{entry.timestamp}".encode()
-            ).hexdigest()
+            ).hexdigest()[:32]
             
             # Generate embedding
             try:
@@ -276,9 +276,9 @@ class JSONBackend(MemoryBackend):
     
     async def add(self, entry: MemoryEntry) -> str:
         """Add a memory entry"""
-        memory_id = entry.id or hashlib.md5(
+        memory_id = entry.id or hashlib.sha256(
             f"{entry.content}{datetime.utcnow()}".encode()
-        ).hexdigest()
+        ).hexdigest()[:32]
         
         self._memories[memory_id] = {
             "content": entry.content,

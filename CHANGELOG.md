@@ -44,7 +44,34 @@ All notable changes to MasterClaw Core will be documented in this file.
   - **Integration**: Stores aliases in rex-deus config (`~/.openclaw/workspace/rex-deus/config/aliases.json`)
   - Version bump to 0.27.0
 
+### Testing Improvements
+- **Comprehensive Analytics Module Test Suite** (`tests/test_analytics.py`) 🆕
+  - Added **37 new tests** providing complete coverage of the analytics/cost tracking module
+  - **Test coverage includes**:
+    - Cost calculation tests for all supported providers (OpenAI, Anthropic) and models
+    - CostTracker functionality: single/multiple entries, date filtering, aggregation
+    - Analytics metrics: request tracking, chat tracking, memory search tracking
+    - Statistics computation: error rates, response times, provider usage breakdowns
+    - Pricing validation: ensures all models have correct pricing structure
+    - Edge cases: zero tokens, negative tokens, large token counts, unknown providers/models
+  - **Test organization**:
+    - `TestCalculateCost` (8 tests) - cost calculation accuracy across providers
+    - `TestCostTracker` (11 tests) - cost tracking, summaries, daily breakdowns
+    - `TestAnalytics` (10 tests) - metrics tracking and statistics computation
+    - `TestPricingConstants` (4 tests) - pricing structure validation
+    - `TestEdgeCases` (4 tests) - boundary conditions and error handling
+  - **Benefits**: Prevents cost calculation regressions, ensures accurate billing, validates pricing updates
+  - Fills critical testing gap in financial/usage tracking functionality
+
 ### Security Hardening & Reliability Improvements
+- **Input Validation & Bounds Checking for `mc top` Command** (`masterclaw-tools/lib/top.js`)
+  - **Security Fix**: Added `validateInterval()` function to prevent DoS attacks via resource exhaustion
+  - **Bounds enforcement**: Interval must be between 1 second (min) and 300 seconds/5 minutes (max)
+  - **DoS Prevention**: Prevents attackers from setting extremely low intervals (e.g., 0.001s) to overwhelm Docker API
+  - **Input sanitization**: Validates interval is a finite number, rejects Infinity, NaN, and non-numeric values
+  - **Graceful degradation**: Falls back to default 3-second interval with warning message on invalid input
+  - **Comprehensive test coverage**: Added 16 new test cases covering valid inputs, boundary values, and attack vectors
+  - **Security audit logging**: Warn-level logs for invalid interval attempts with context
 - **Test Framework Standardization** (`masterclaw-tools/tests/http-client.test.js`)
   - Converted test file from `node:test` to Jest framework for consistency
   - Fixed failing test by properly importing SERVICES from services module

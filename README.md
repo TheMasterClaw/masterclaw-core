@@ -119,6 +119,39 @@ DELETE /v1/sessions/{session_id}
 GET /v1/sessions/stats/summary
 ```
 
+### Context API (rex-deus Integration) 🆕
+
+Access Rex's personal context files programmatically:
+
+```bash
+# Get projects
+GET /v1/context/projects?status=active&priority=high
+
+# Get goals
+GET /v1/context/goals?status=active
+
+# Get people
+GET /v1/context/people?role=developer
+
+# Get knowledge entries
+GET /v1/context/knowledge?category=technology
+
+# Get preferences
+GET /v1/context/preferences?category=communication
+
+# Search across all context
+GET /v1/context/search?query=masterclaw
+
+# Get context summary
+GET /v1/context/summary
+```
+
+**Use Cases:**
+- Personalized responses based on Rex's preferences
+- Query active projects and goals
+- Knowledge base lookups
+- People and relationship context
+
 ## Architecture
 
 ```
