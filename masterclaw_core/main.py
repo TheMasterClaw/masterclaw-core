@@ -1,6 +1,7 @@
 """Main FastAPI application for MasterClaw Core"""
 
 import asyncio
+import json
 import logging
 import sys
 import time
@@ -8,7 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request, Depends
+from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response, JSONResponse
@@ -50,6 +51,9 @@ from .models import (
     SystemInfoResponse,
     ComponentHealth,
     FeatureAvailability,
+    WebhookResponse,
+    WebhookConfigResponse,
+    WebhookEventType,
 )
 
 from .analytics import analytics
@@ -217,6 +221,7 @@ app = FastAPI(
         {"name": "costs", "description": "LLM cost tracking and pricing"},
         {"name": "tools", "description": "Tool use framework - GitHub, system, weather"},
         {"name": "context", "description": "Rex-deus context access - projects, goals, people, knowledge, preferences"},
+        {"name": "webhooks", "description": "GitHub webhook integration for CI/CD automation"},
     ],
 )
 
@@ -297,6 +302,8 @@ async def root():
             "/v1/context/preferences (NEW)",
             "/v1/context/search (NEW)",
             "/v1/context/summary (NEW)",
+            "/webhooks/github (NEW)",
+            "/webhooks/github/config (NEW)",
         ],
     }
 
@@ -2367,4 +2374,201 @@ async def get_context_summary():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to load context summary"
+        )
+
+
+# =============================================================================
+# GitHub Webhook Integration
+# =============================================================================
+
+from .webhook import webhook_handler, WebhookSecurityError
+from .models import WebhookResponse, WebhookConfigResponse
+
+
+@app.get("/webhooks/github", response_model=WebhookConfigResponse, tags=["webhooks"])
+async def get_github_webhook_config(http_request: Request):
+    """
+    Get GitHub webhook configuration status.
+
+    Returns information about webhook configuration including:
+    - Whether webhooks are enabled
+    - Which events are supported/allowed
+    - The endpoint URL for webhook registration
+
+    Use this to verify your webhook setup before configuring GitHub.
+    """
+    from .config import settings
+
+    # Build endpoint URL from request
+    scheme = http_request.headers.get("x-forwarded-proto", "http")
+    host = http_request.headers.get("host", "localhost")
+    endpoint_url = f"{scheme}://{host}/webhooks/github"
+
+    # Check if secret is configured
+    import os
+    secret_configured = bool(os.getenv("GITHUB_WEBHOOK_SECRET", ""))
+
+    return WebhookConfigResponse(
+        enabled=secret_configured,
+        secret_configured=secret_configured,
+        allowed_events=[e.value for e in webhook_handler.allowed_events],
+        supported_events=[e.value for e in [
+            WebhookEventType.PUSH,
+            WebhookEventType.PULL_REQUEST,
+            WebhookEventType.WORKFLOW_RUN,
+            WebhookEventType.WORKFLOW_JOB,
+            WebhookEventType.RELEASE,
+            WebhookEventType.PING,
+        ]],
+        endpoint_url=endpoint_url
+    )
+
+
+@app.post("/webhooks/github", response_model=WebhookResponse, tags=["webhooks"])
+async def handle_github_webhook(
+    request: Request,
+    x_github_event: Optional[str] = Header(None, alias="X-GitHub-Event"),
+    x_hub_signature_256: Optional[str] = Header(None, alias="X-Hub-Signature-256"),
+    x_github_delivery: Optional[str] = Header(None, alias="X-GitHub-Delivery"),
+):
+    """
+    Receive and process GitHub webhook events.
+
+    ## Security
+
+    This endpoint verifies webhook authenticity using HMAC-SHA256 signatures.
+    Configure `GITHUB_WEBHOOK_SECRET` environment variable with your webhook secret.
+
+    ## Supported Events
+
+    - **push** — Code pushed to repository
+    - **pull_request** — PR opened, closed, merged, updated
+    - **workflow_run** — GitHub Actions workflow completed
+    - **release** — New release published
+    - **ping** — Webhook setup verification
+
+    ## GitHub Configuration
+
+    1. Go to Repository Settings → Webhooks
+    2. Add webhook URL: `https://your-domain/webhooks/github`
+    3. Content type: `application/json`
+    4. Set secret (must match GITHUB_WEBHOOK_SECRET)
+    5. Select events to deliver
+
+    ## Response Actions
+
+    Based on event type and content, MasterClaw may:
+    - Log the event for audit purposes
+    - Send notifications for important events
+    - Trigger deployment candidates (on successful CI to main branch)
+    - Alert on workflow failures
+
+    ## Headers
+
+    - **X-GitHub-Event**: Event type (push, pull_request, etc.)
+    - **X-Hub-Signature-256**: HMAC-SHA256 signature for verification
+    - **X-GitHub-Delivery**: Unique delivery ID for idempotency
+    """
+    start_time = time.time()
+
+    # Validate required headers
+    if not x_github_event:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-GitHub-Event header"
+        )
+
+    if not x_github_delivery:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-GitHub-Delivery header"
+        )
+
+    # Read raw body for signature verification
+    body = await request.body()
+
+    # Verify signature if secret is configured
+    try:
+        if webhook_handler.secret:
+            if not x_hub_signature_256:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Missing X-Hub-Signature-256 header"
+                )
+
+            if not webhook_handler.verify_signature(body, x_hub_signature_256):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid webhook signature"
+                )
+    except WebhookSecurityError as e:
+        logger.error(f"Webhook security error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Webhook security configuration error"
+        )
+
+    # Parse JSON payload
+    try:
+        payload_data = json.loads(body)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {str(e)}"
+        )
+
+    # Check if event type is allowed
+    if not webhook_handler.is_event_allowed(x_github_event):
+        logger.info(f"Ignoring disallowed webhook event type: {x_github_event}")
+        return WebhookResponse(
+            success=True,
+            message=f"Event type '{x_github_event}' is not configured for processing",
+            event_type=x_github_event,
+            action_taken="ignored",
+            delivery_id=x_github_delivery,
+            metadata={"reason": "event_type_not_allowed"}
+        )
+
+    # Parse payload into structured format
+    try:
+        webhook_payload = webhook_handler.parse_payload(
+            event_type=x_github_event,
+            payload=payload_data,
+            delivery_id=x_github_delivery
+        )
+    except Exception as e:
+        logger.error(f"Failed to parse webhook payload: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to parse webhook payload: {str(e)}"
+        )
+
+    # Process the webhook
+    try:
+        result = await webhook_handler.process_webhook(webhook_payload)
+
+        # Track metrics
+        duration_ms = (time.time() - start_time) * 1000
+        prom_metrics.track_request("POST", "/webhooks/github", 200, duration_ms)
+
+        # Log processing result
+        logger.info(
+            f"Webhook processed: {x_github_event} from {webhook_payload.repository} "
+            f"(delivery: {x_github_delivery}, action: {result.action_taken})"
+        )
+
+        return WebhookResponse(
+            success=result.success,
+            message=result.message,
+            event_type=result.event_type,
+            action_taken=result.action_taken,
+            delivery_id=x_github_delivery,
+            metadata=result.metadata
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to process webhook: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process webhook: {str(e)}"
         )

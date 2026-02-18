@@ -1,5 +1,6 @@
 """Pydantic models for MasterClaw Core"""
 
+from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
@@ -376,3 +377,71 @@ class SystemInfoResponse(BaseModel):
     # API Info
     api_documentation: Dict[str, str] = Field(default_factory=dict, description="API documentation URLs")
     rate_limit: Dict[str, Any] = Field(default_factory=dict, description="Rate limit configuration")
+
+
+# =============================================================================
+# Webhook Models
+# =============================================================================
+
+class WebhookEventType(str, Enum):
+    """GitHub webhook event types"""
+    PUSH = "push"
+    PULL_REQUEST = "pull_request"
+    WORKFLOW_RUN = "workflow_run"
+    WORKFLOW_JOB = "workflow_job"
+    RELEASE = "release"
+    PING = "ping"
+    ISSUES = "issues"
+    ISSUE_COMMENT = "issue_comment"
+
+
+class WebhookPayload(BaseModel):
+    """GitHub webhook payload structure"""
+    event_type: str = Field(..., description="GitHub event type")
+    delivery_id: str = Field(..., description="Unique delivery ID")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    repository: str = Field(..., description="Repository full name")
+    repository_url: str = Field(..., description="Repository HTML URL")
+    sender: str = Field(..., description="GitHub username who triggered the event")
+    sender_avatar: Optional[str] = Field(None, description="Sender avatar URL")
+    
+    # Push event fields
+    ref: Optional[str] = Field(None, description="Git ref (branch/tag)")
+    commit_sha: Optional[str] = Field(None, description="Commit SHA")
+    commit_message: Optional[str] = Field(None, description="Commit message")
+    pusher: Optional[str] = Field(None, description="Git pusher name")
+    
+    # Pull request fields
+    pr_number: Optional[int] = Field(None, description="PR number")
+    pr_title: Optional[str] = Field(None, description="PR title")
+    pr_state: Optional[str] = Field(None, description="PR state")
+    pr_url: Optional[str] = Field(None, description="PR URL")
+    pr_action: Optional[str] = Field(None, description="PR action (opened, closed, etc.)")
+    
+    # Workflow fields
+    workflow_name: Optional[str] = Field(None, description="Workflow name")
+    workflow_status: Optional[str] = Field(None, description="Workflow status")
+    workflow_conclusion: Optional[str] = Field(None, description="Workflow conclusion")
+    workflow_run_id: Optional[int] = Field(None, description="Workflow run ID")
+    workflow_branch: Optional[str] = Field(None, description="Branch being built")
+
+
+class WebhookResponse(BaseModel):
+    """Response from webhook processing"""
+    success: bool = Field(..., description="Whether the webhook was processed successfully")
+    message: str = Field(..., description="Human-readable result message")
+    event_type: str = Field(..., description="Event type that was processed")
+    action_taken: Optional[str] = Field(None, description="Action taken as a result")
+    delivery_id: str = Field(..., description="GitHub delivery ID")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional event metadata")
+
+
+class WebhookConfigResponse(BaseModel):
+    """Webhook configuration status"""
+    enabled: bool = Field(..., description="Whether webhooks are enabled")
+    secret_configured: bool = Field(..., description="Whether webhook secret is configured")
+    allowed_events: List[str] = Field(default_factory=list, description="List of allowed event types")
+    supported_events: List[str] = Field(default_factory=list, description="List of all supported event types")
+    endpoint_url: str = Field(..., description="Full URL for webhook registration")
+
