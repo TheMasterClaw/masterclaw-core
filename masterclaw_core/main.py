@@ -86,16 +86,21 @@ from .security_response import (
 )
 from .tasks import task_queue
 from .health_history import health_history, HealthRecord
-
-# Configure structured logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+from .structured_logger import (
+    get_logger,
+    configure_logging,
+    request_context,
+    get_current_context,
 )
-logger = logging.getLogger("masterclaw")
+
+# Configure structured logging at startup
+# Use JSON format in production, console format in development
+configure_logging(
+    level=settings.LOG_LEVEL.upper(),
+    json_format=settings.ENVIRONMENT in ("production", "prod"),
+    include_context=True
+)
+logger = get_logger("masterclaw")
 
 
 # Global memory store
@@ -112,40 +117,44 @@ async def lifespan(app: FastAPI):
 
     # Startup
     SERVER_START_TIME = datetime.utcnow()
-    logger.info(f"🐾 MasterClaw Core v{__version__} starting...")
+    logger.info("MasterClaw Core starting", version=__version__, environment=settings.ENVIRONMENT)
 
     # Log security configuration report
     security_report = settings.get_security_report()
     if security_report["is_production"]:
         if security_report["secure"]:
-            logger.info("✅ Security configuration check passed")
+            logger.info("Security configuration check passed")
         else:
-            logger.warning("⚠️  Security configuration issues detected:")
-            for issue in security_report["issues"]:
-                logger.warning(f"   - {issue}")
+            logger.warning(
+                "Security configuration issues detected",
+                issues=security_report["issues"],
+                issue_count=len(security_report["issues"])
+            )
 
     # Log config issues (in any environment)
     if security_report.get("config_issues"):
-        logger.warning("⚠️  Configuration issues detected:")
-        for issue in security_report["config_issues"]:
-            logger.warning(f"   - {issue}")
+        logger.warning(
+            "Configuration issues detected",
+            issues=security_report["config_issues"]
+        )
 
     if security_report["recommendations"]:
-        logger.info("💡 Configuration recommendations:")
-        for rec in security_report["recommendations"]:
-            logger.info(f"   - {rec}")
+        logger.info(
+            "Configuration recommendations",
+            recommendations=security_report["recommendations"]
+        )
 
     memory = get_memory_store()
-    logger.info(f"✅ Memory store initialized ({settings.MEMORY_BACKEND})")
-    logger.info(f"✅ LLM providers: {llm_router.list_providers()}")
+    logger.info("Memory store initialized", backend=settings.MEMORY_BACKEND)
+    logger.info("LLM providers available", providers=llm_router.list_providers())
 
     # Initialize security auto-responder
     await initialize_auto_responder()
-    logger.info("✅ Security auto-responder initialized")
+    logger.info("Security auto-responder initialized")
 
     # Start background task queue
     await task_queue.start()
-    logger.info(f"✅ Task queue started ({task_queue.max_workers} workers)")
+    logger.info("Task queue started", workers=task_queue.max_workers)
 
     # Start health history cleanup scheduler
     async def cleanup_scheduler():
@@ -154,20 +163,20 @@ async def lifespan(app: FastAPI):
             try:
                 await asyncio.sleep(86400)  # Run daily
                 deleted = health_history.cleanup_old_records(days=30)
-                logger.info(f"🧹 Health history cleanup: removed {deleted} old records")
+                logger.info("Health history cleanup completed", deleted_records=deleted)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Health history cleanup error: {e}")
+                logger.error("Health history cleanup error", error=str(e))
                 await asyncio.sleep(3600)  # Retry in 1 hour on error
 
     cleanup_task = asyncio.create_task(cleanup_scheduler())
-    logger.info("✅ Health history cleanup scheduler started")
+    logger.info("Health history cleanup scheduler started")
 
     yield
 
     # Shutdown
-    logger.info("🛑 MasterClaw Core shutting down...")
+    logger.info("MasterClaw Core shutting down")
 
     # Cancel cleanup scheduler
     cleanup_task.cancel()
@@ -175,15 +184,15 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
-    logger.info("✅ Health history cleanup scheduler stopped")
+    logger.info("Health history cleanup scheduler stopped")
 
     # Shutdown task queue gracefully
     await task_queue.stop()
-    logger.info("✅ Task queue shutdown complete")
+    logger.info("Task queue shutdown complete")
 
     # Shutdown security auto-responder
     await shutdown_auto_responder()
-    logger.info("✅ Security auto-responder shutdown complete")
+    logger.info("Security auto-responder shutdown complete")
 
 
 # Create FastAPI app with interactive API documentation
@@ -225,11 +234,33 @@ app = FastAPI(
     ],
 )
 
-# Register exception handlers
-app.add_exception_handler(MasterClawException, masterclaw_exception_handler)
-app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-app.add_exception_handler(RequestValidationError, validation_exception_handler)
-app.add_exception_handler(Exception, general_exception_handler)
+# Register exception handlers with structured logging
+def create_structured_exception_handler(original_handler, error_type: str):
+    """Wrap an exception handler to add structured logging with request context."""
+    async def structured_handler(request: Request, exc: Exception):
+        # Get request context
+        request_id = getattr(request.state, 'request_id', None)
+        client_ip = request.client.host if request.client else None
+        
+        # Log with structured data
+        with request_context(request_id=request_id, client_ip=client_ip):
+            logger.error(
+                f"Exception handled: {error_type}",
+                error_type=error_type,
+                error_message=str(exc),
+                path=request.url.path,
+                method=request.method,
+                exc_info=True
+            )
+        
+        # Call original handler
+        return await original_handler(request, exc)
+    return structured_handler
+
+app.add_exception_handler(MasterClawException, create_structured_exception_handler(masterclaw_exception_handler, "MasterClawException"))
+app.add_exception_handler(StarletteHTTPException, create_structured_exception_handler(http_exception_handler, "HTTPException"))
+app.add_exception_handler(RequestValidationError, create_structured_exception_handler(validation_exception_handler, "ValidationError"))
+app.add_exception_handler(Exception, create_structured_exception_handler(general_exception_handler, "UnhandledException"))
 
 # Add security and logging middleware (order matters - last added = first executed)
 # IP Block middleware should be first to block banned IPs immediately
