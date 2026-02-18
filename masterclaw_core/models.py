@@ -8,13 +8,13 @@ from datetime import datetime
 
 class ChatRequest(BaseModel):
     """Request model for chat completions"""
-    message: str = Field(..., description="User message", min_length=1)
-    session_id: Optional[str] = Field(None, description="Session identifier for context")
-    model: Optional[str] = Field(None, description="LLM model to use")
+    message: str = Field(..., description="User message", min_length=1, max_length=100000)
+    session_id: Optional[str] = Field(None, description="Session identifier for context", max_length=64)
+    model: Optional[str] = Field(None, description="LLM model to use", max_length=100)
     provider: Optional[Literal["openai", "anthropic"]] = Field(None, description="LLM provider")
     temperature: float = Field(0.7, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(None, ge=1, le=4096)
-    system_prompt: Optional[str] = Field(None, description="Custom system prompt")
+    system_prompt: Optional[str] = Field(None, description="Custom system prompt", max_length=10000)
     use_memory: bool = Field(True, description="Whether to use memory retrieval")
 
 
@@ -31,16 +31,16 @@ class ChatResponse(BaseModel):
 
 class MemoryEntry(BaseModel):
     """Model for memory entries"""
-    id: Optional[str] = Field(None, description="Memory ID")
-    content: str = Field(..., description="Memory content", min_length=1)
+    id: Optional[str] = Field(None, description="Memory ID", max_length=64)
+    content: str = Field(..., description="Memory content", min_length=1, max_length=500000)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    source: Optional[str] = Field(None, description="Source of memory")
+    source: Optional[str] = Field(None, description="Source of memory", max_length=256)
 
 
 class MemorySearchRequest(BaseModel):
     """Request model for memory search"""
-    query: str = Field(..., description="Search query", min_length=1)
+    query: str = Field(..., description="Search query", min_length=1, max_length=10000)
     top_k: int = Field(5, ge=1, le=20, description="Number of results")
     filter_metadata: Optional[Dict[str, Any]] = Field(None, description="Metadata filters")
 
