@@ -15,7 +15,7 @@
 | **Total Files** | 90+ |
 | **Total Lines of Code** | 6,000+ |
 | **Docker Services** | 10 |
-| **CLI Commands** | 34+ (added `mc smoke-test`) |
+| **CLI Commands** | 36+ (added `mc audit`) |
 | **API Endpoints** | 23+ |
 | **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
@@ -194,6 +194,12 @@ mc health           # Comprehensive health check
 mc health --watch   # Continuous health monitoring
 mc health --notify  # Send alerts when unhealthy
 mc health --compact # Cron-friendly output
+mc audit            # View security audit logs
+mc audit --summary  # Show audit statistics
+mc audit -t SECURITY_VIOLATION  # Filter by event type
+mc audit -s error   # Filter by severity
+mc audit --verify   # Verify entry signatures
+mc audit-verify     # Verify audit log integrity
 ```
 
 ---
