@@ -12,10 +12,10 @@
 | Metric | Count |
 |--------|-------|
 | **Total Repositories** | 6 |
-| **Total Files** | 90+ |
+| **Total Files** | 91+ |
 | **Total Lines of Code** | 6,000+ |
 | **Docker Services** | 10 |
-| **CLI Commands** | 38+ (added `mc metrics`) |
+| **CLI Commands** | 40+ (added `mc ssl monitor`) |
 | **API Endpoints** | 28+ |
 | **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
@@ -51,6 +51,7 @@
 - ✅ **Zero-downtime blue-green deployment** with automatic rollback
 - ✅ Canary deployment support (gradual traffic shifting)
 - ✅ **SSL certificate expiration monitoring** (14-day warning, 7-day critical)
+- ✅ **Automated SSL monitoring with scheduling** (daily checks with notifications)
 - ✅ **Automated backup verification** (scheduled verification with notifications)
 - ✅ Monitoring with Prometheus + Grafana + **Loki**
 - ✅ Centralized log aggregation with 30-day retention
@@ -127,6 +128,7 @@ mc smoke-test       # Post-deployment API verification tests
 mc smoke-test --quick  # Quick smoke test (critical endpoints only)
 mc status           # Check health
 mc status --watch   # Continuous monitoring
+mc analyze          # Analyze logs for errors and anomalies
 mc deploy rolling   # Zero-downtime blue-green deployment
 mc deploy canary 10 # Canary deployment (10% traffic)
 mc deploy rollback  # Rollback to previous version
@@ -186,6 +188,10 @@ mc session stats    # Session statistics
 mc session cleanup  # Cleanup old sessions
 mc ssl check        # Check SSL certificate expiration
 mc ssl renew        # Force SSL renewal
+mc ssl monitor      # Manage automated SSL monitoring
+mc ssl monitor --install --webhook https://hooks.slack.com/...  # With notifications
+mc ssl monitor --status    # Check monitoring status
+mc ssl monitor --run-now   # Run check immediately
 mc dashboard        # List monitoring dashboards
 mc dashboard --all  # Open all dashboards
 mc dashboard open grafana    # Open Grafana

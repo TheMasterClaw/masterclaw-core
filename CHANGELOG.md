@@ -4,6 +4,42 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Security & Error Handling Improvements
+- **Client Generator Security Hardening** (`masterclaw-tools/lib/client.js`) 🔒
+  - **SSRF Protection**: Replaced raw `axios` with secure `http-client` that validates URLs against SSRF attacks
+  - **Centralized Error Handling**: All commands now use `wrapCommand()` for consistent error handling with proper exit codes
+  - **Rate Limiting**: Added rate limiting to all `mc client` subcommands to prevent abuse
+  - **Input Validation**: Added URL format validation and language option validation
+  - **Bug Fix**: Fixed Python template syntax error (`or` → `||` in template literals)
+  - **Comprehensive Tests**: Added `masterclaw-tools/tests/client.test.js` with 65 tests covering:
+    - SSRF protection validation
+    - Rate limiting integration
+    - Error handling scenarios
+    - Client code generation logic
+    - Metadata management
+    - Security features
+  - **Files modified**: `masterclaw-tools/lib/client.js`
+  - **Files added**: `masterclaw-tools/tests/client.test.js` (65 tests)
+
+### Added
+- **Deployment Notifications** (`mc deploy --notify`) 🆕
+  - Automatic notifications to Discord, Slack, Telegram, WhatsApp when deployments occur
+  - **Notification types**: deployment started, successful, failed, rolled back
+  - **Rich context**: Includes version, color (blue/green), duration, initiator, error details
+  - **New commands**:
+    - `mc deploy rolling --notify` — Deploy with notifications
+    - `mc deploy canary 10 --notify` — Canary deployment with notifications
+    - `mc deploy rollback --notify` — Rollback with notifications
+    - `mc deploy notify --enable` — Enable deployment notifications
+    - `mc deploy notify --disable` — Disable deployment notifications
+    - `mc deploy notify-test` — Send test deployment notification
+  - **Backward compatible**: Opt-in via `--notify` flag, existing workflows unchanged
+  - **Integration**: Uses existing notification channels configured via `mc notify`
+  - **Graceful degradation**: Notification failures don't affect deployment success
+  - **Files modified**: `masterclaw-tools/lib/deploy.js`
+  - **Files added**: `masterclaw-tools/tests/deploy.notifications.test.js` (22 tests)
+  - Version bump to 0.34.0
+
 ### Added
 - **Logger Flush on Process Exit** — Ensures critical logs are persisted during crashes 🆕
   - Added `flushLogger()` integration in error handler for all exit scenarios
