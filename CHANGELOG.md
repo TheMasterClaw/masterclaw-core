@@ -4,6 +4,45 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Added: Cost Budget Alert System (`mc cost budget-*`) 💰
+- **New Feature**: Comprehensive budget management with automated alerts and notifications
+  - **Purpose**: Prevent surprise LLM bills by proactively monitoring spending against defined budgets
+  - **Benefit**: Real-time notifications when spending thresholds are exceeded
+
+- **New Commands**:
+  - `mc cost budget-set` — Configure monthly budget and alert thresholds
+    - Set monthly budget amount (`--amount`)
+    - Configure warning threshold (`--warn`, default 80%)
+    - Configure critical threshold (`--critical`, default 95%)
+    - Enable/disable notifications (`--notifications`)
+    - Set alert cooldown period (`--cooldown`)
+  - `mc cost budget-show` — Display budget configuration and current spending
+    - Visual progress bar showing budget usage
+    - Color-coded status (healthy/warning/critical)
+    - Spending projection based on 7-day average
+    - JSON output support with `--json`
+  - `mc cost budget-check` — Check spending against budget with notifications
+    - Sends notifications when thresholds are exceeded
+    - Respects alert cooldown to prevent spam
+    - Returns exit codes for CI/CD integration (0=healthy, 1=warning, 2=critical)
+  - `mc cost budget-monitor` — Manage automated budget monitoring
+    - Enable/disable cron-based monitoring (`--enable`/`--disable`)
+    - Configurable check interval (`--interval`)
+    - Show monitoring status (`--status`)
+  - `mc cost budget-history` — View budget alert history
+    - Shows past alerts with timestamps and levels
+    - Configurable limit (`--limit`)
+
+- **Features**:
+  - Persistent budget configuration stored in `config/budget.json`
+  - Smart notifications with cooldown periods (default 24 hours)
+  - Visual progress bars and color-coded status indicators
+  - Spending projections based on recent usage patterns
+  - Integration with existing notification channels (WhatsApp, Discord, Slack, Telegram)
+  - Budget alert history tracking
+
+- **Documentation**: Added comprehensive documentation in `COST_BUDGET_IMPROVEMENT.md`
+
 ### Added: Context API CLI Commands (`mc context api-*`) 🆕
 - **New Feature**: Added missing CLI commands for accessing rex-deus context via Core API
   - **Purpose**: Complete the context API integration by adding commands for people, knowledge, and preferences

@@ -304,6 +304,7 @@ async def root():
             "/health/history",
             "/health/history/summary",
             "/health/history/uptime",
+            "/health/insights (NEW)",
             "/info",
             "/metrics",
             "/v1/chat",
@@ -542,6 +543,126 @@ async def record_health_check(record: Dict[str, Any]):
         return {"status": "recorded"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to record health check: {str(e)}")
+
+
+@app.get("/health/insights", tags=["health"])
+async def get_health_insights(
+    since: Optional[str] = None,
+    component: Optional[str] = None,
+    analysis_type: str = "comprehensive",
+):
+    """
+    Get AI-powered health insights and trend analysis.
+
+    Provides intelligent analysis of health history including:
+    - **Trend Analysis**: Direction (improving/degrading/stable), change rate, stability score
+    - **MTBF/MTTR**: Mean Time Between Failures and Mean Time To Recovery
+    - **Flapping Detection**: Services rapidly switching between healthy/unhealthy states
+    - **Degradation Prediction**: Predict potential issues based on trend extrapolation
+    - **Component Ranking**: Compare reliability across all components
+
+    Query parameters:
+    - **since**: ISO timestamp for analysis start (default: 7 days ago)
+    - **component**: Filter to specific component (default: all components)
+    - **analysis_type**: Type of analysis to run:
+      - `comprehensive` (default): Full analysis with all metrics
+      - `trends`: Trend analysis only
+      - `mtbf_mttr`: Reliability metrics only
+      - `flapping`: Flapping detection only
+      - `prediction`: Degradation prediction only
+      - `ranking`: Component ranking only
+
+    Returns actionable insights and recommendations based on the analysis.
+
+    Example response:
+    ```json
+    {
+      "summary": {
+        "insight_count": 2,
+        "recommendation_count": 2,
+        "overall_health": 0.95
+      },
+      "insights": [
+        {
+          "type": "trend",
+          "severity": "warning",
+          "message": "Overall health is degrading (change: -0.15)"
+        }
+      ],
+      "recommendations": [
+        "Investigate recent changes or increased load"
+      ],
+      "details": {
+        "trends": { ... },
+        "mtbf_mttr": { ... },
+        "flapping": { ... },
+        "prediction": { ... }
+      }
+    }
+    ```
+    """
+    from .health_history import health_analyzer
+
+    # Parse since timestamp
+    since_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid 'since' timestamp format")
+    else:
+        since_dt = datetime.utcnow() - timedelta(days=7)
+
+    # Validate analysis_type
+    valid_types = ["comprehensive", "trends", "mtbf_mttr", "flapping", "prediction", "ranking"]
+    if analysis_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid analysis_type. Must be one of: {', '.join(valid_types)}"
+        )
+
+    try:
+        result = {"generated_at": datetime.utcnow().isoformat(), "period": {"since": since_dt.isoformat(), "until": datetime.utcnow().isoformat()}}
+
+        # Run requested analysis
+        if analysis_type == "comprehensive":
+            if component:
+                # For single component, include all analyses
+                result.update({
+                    "component": component,
+                    "trends": health_analyzer.analyze_trends(component=component, since=since_dt),
+                    "mtbf_mttr": health_analyzer.calculate_mtbf_mttr(component=component, since=since_dt),
+                    "flapping": health_analyzer.detect_flapping(component=component, since=since_dt),
+                    "prediction": health_analyzer.predict_degradation(component=component),
+                    "ranking": health_analyzer.get_component_ranking(since=since_dt),
+                })
+            else:
+                # For all components, use comprehensive insights
+                insights = health_analyzer.get_health_insights(since=since_dt)
+                result.update(insights)
+
+        elif analysis_type == "trends":
+            result.update(health_analyzer.analyze_trends(component=component, since=since_dt))
+
+        elif analysis_type == "mtbf_mttr":
+            comp = component or "overall"
+            result.update(health_analyzer.calculate_mtbf_mttr(component=comp, since=since_dt))
+
+        elif analysis_type == "flapping":
+            result.update(health_analyzer.detect_flapping(component=component, since=since_dt))
+
+        elif analysis_type == "prediction":
+            comp = component or "overall"
+            result.update(health_analyzer.predict_degradation(component=comp))
+
+        elif analysis_type == "ranking":
+            result.update(health_analyzer.get_component_ranking(since=since_dt))
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Health insights analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
 @app.get("/info", response_model=SystemInfoResponse, tags=["health"])
