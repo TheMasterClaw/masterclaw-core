@@ -5,6 +5,25 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Real-Time Container Resource Monitor** (`mc top`) 🆕
+  - New `mc top` command - like `htop` but for MasterClaw services
+  - **Real-time monitoring** — Auto-updating display of container CPU, memory, network I/O
+  - **Categorized view** — Services grouped by type (App, Data, Infrastructure, Monitoring)
+  - **Visual indicators** — Color-coded usage levels (green/yellow/red), health status icons
+  - **Trend detection** — Arrows show CPU usage trending up/down vs previous sample
+  - **Subcommands/Options**:
+    - `mc top` — Start interactive watch mode (default)
+    - `mc top --once` — Single snapshot, no refresh
+    - `mc top --interval 5` — Custom refresh interval (seconds)
+    - `mc top --json` — Output as JSON for scripting
+    - `mc top --export stats.json` — Export to file
+  - **Display columns**: Container, Status, CPU%, Memory, Mem%, Net I/O, PIDs, Uptime
+  - **Docker system summary** — Shows total containers, images, volumes with sizes
+  - **Services monitored**: traefik, interface, backend, core, gateway, chroma, watchtower, grafana, prometheus, loki
+  - **New files**: `masterclaw-tools/lib/top.js` (module), updated `bin/mc.js` (CLI registration)
+  - **Security**: Rate limiting on watch mode, input validation for interval values
+  - Version bump to 0.29.0
+
 - **Alias Management Command** (`masterclaw-tools/lib/alias.js`)
   - New `mc alias` command for managing CLI aliases and shortcuts
   - **Command aliases**: Short aliases for frequently used commands (e.g., `s` → `status`, `l` → `logs`)
