@@ -15,8 +15,8 @@
 | **Total Files** | 90+ |
 | **Total Lines of Code** | 6,000+ |
 | **Docker Services** | 10 |
-| **CLI Commands** | 36+ (added `mc audit`) |
-| **API Endpoints** | 23+ |
+| **CLI Commands** | 37+ (added `mc performance`) |
+| **API Endpoints** | 28+ |
 | **Monitoring Alerts** | 9 (including SSL expiration) |
 | **Automated Improvements** | Every 20 min for 4 hours |
 
@@ -87,6 +87,7 @@
 **Features:**
 - ✅ REST API with 23+ endpoints
 - ✅ **Interactive API documentation** (Swagger UI + ReDoc + OpenAPI schema)
+- ✅ **API Performance Profiling** - Endpoint-level timing, slow request detection, performance analytics
 - ✅ WebSocket for real-time chat
 - ✅ LLM routing (OpenAI, Anthropic)
 - ✅ Vector memory with semantic search

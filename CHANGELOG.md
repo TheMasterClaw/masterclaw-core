@@ -5,6 +5,31 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **API Performance Profiling** - Comprehensive endpoint performance monitoring and analysis
+  - New `PerformanceProfilingMiddleware` tracks request duration per endpoint
+  - Configurable slow request threshold (default: 1000ms) via `PERF_SLOW_THRESHOLD_MS`
+  - Memory-efficient profile storage with configurable limit (default: 10,000 profiles)
+  - NEW API Endpoints:
+    - `GET /v1/performance/profiles` — View recent request profiles with optional slow-only filter
+    - `GET /v1/performance/stats` — Aggregated endpoint statistics (count, avg/min/max times, slow%)
+    - `GET /v1/performance/slowest` — Top N slowest endpoints by average response time
+    - `GET /v1/performance/summary` — Quick performance overview
+    - `DELETE /v1/performance/profiles` — Clear all profiles (auth required)
+  - NEW CLI Commands (`mc performance`):
+    - `mc performance` — Show performance summary (default)
+    - `mc performance --stats` — Detailed endpoint statistics table
+    - `mc performance --slowest [n]` — Show top N slowest endpoints
+    - `mc performance --profiles [n]` — Show recent request profiles
+    - `mc performance --profiles --slow-only` — Only show slow requests
+    - `mc performance --clear` — Clear all performance profiles
+  - Features:
+    - Color-coded response times (green < 500ms, yellow < 1000ms, red > 1000ms)
+    - Automatic logging of slow requests with warnings
+    - Groups profiles by endpoint for better readability
+    - Pydantic models for type-safe responses
+    - OpenAPI documentation in Swagger UI and ReDoc
+  - Files: `lib/performance.js` (CLI), updated `middleware.py`, `models.py`, `main.py`
+
 - **Secrets Management Module (`mc secrets`)** - Secure, centralized secrets management for the MasterClaw ecosystem
   - `mc secrets check` — Validate all required secrets are configured across CLI and .env
   - `mc secrets list` — Display configured secrets with masking (never shows full values)
