@@ -11,7 +11,7 @@ import subprocess
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Callable, AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 import httpx
@@ -47,7 +47,7 @@ class ToolResult:
     data: Any = None
     error: Optional[str] = None
     logs: List[str] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class BaseTool(ABC):
