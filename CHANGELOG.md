@@ -4,6 +4,30 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Added: Context API CLI Commands (`mc context api-*`) 🆕
+- **New Feature**: Added missing CLI commands for accessing rex-deus context via Core API
+  - **Purpose**: Complete the context API integration by adding commands for people, knowledge, and preferences
+  - **Benefit**: Users can now query all context types remotely via API, not just projects and goals
+
+- **New Commands**:
+  - `mc context api-people` — Query people/relationships from rex-deus context via API
+    - Supports filtering by `--role` (developer, designer, etc.)
+    - Supports filtering by `--relationship` (friend, colleague, client)
+    - JSON output support with `--json`
+  - `mc context api-knowledge` — Query knowledge entries from rex-deus context via API
+    - Supports filtering by `--category`
+    - Supports filtering by `--confidence` (high, medium, low)
+    - Groups output by category for readability
+    - JSON output support with `--json`
+  - `mc context api-preferences` — Query preferences from rex-deus context via API
+    - Supports filtering by `--category` (Communication, Technical, etc.)
+    - Supports filtering by `--priority` (required, preferred, optional)
+    - Priority indicators (!, ●, ○) for quick visual scanning
+    - JSON output support with `--json`
+
+- **Consistency**: All context types (projects, goals, people, knowledge, preferences) now have corresponding API CLI commands
+- **Documentation**: Added comprehensive documentation for all context API commands in README
+
 ### Security & Error Handling: HTTP Client Resource Cleanup 🔒
 - **Improved**: Added AbortController support for request cancellation in http-client
   - **Purpose**: Prevents resource leaks when security validation fails (SSRF, header injection)
