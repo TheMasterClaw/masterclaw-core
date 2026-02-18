@@ -571,10 +571,33 @@ class SystemTool(BaseTool):
             return ToolResult(success=False, error=f"Execution failed: {str(e)}")
     
     async def _disk_usage(self, path: str) -> ToolResult:
-        """Get disk usage for a path"""
+        """Get disk usage for a path with security validation"""
+        # Import here to avoid circular imports
+        from .security import validate_file_path, sanitize_path_for_display
+        
+        # Validate the path to prevent path traversal attacks
+        is_valid, error_message = validate_file_path(
+            path,
+            allow_absolute=False,  # Don't allow absolute paths
+            max_length=1024  # Reasonable limit for disk usage paths
+        )
+        
+        if not is_valid:
+            safe_path = sanitize_path_for_display(path)
+            logger.warning(
+                f"Path validation failed for disk_usage: path={safe_path}, error={error_message}"
+            )
+            return ToolResult(
+                success=False,
+                error=f"Invalid path: {error_message}"
+            )
+        
+        # Normalize the path after validation
+        normalized_path = os.path.normpath(path)
+        
         try:
             result = subprocess.run(
-                ["df", "-h", path],
+                ["df", "-h", normalized_path],
                 capture_output=True,
                 text=True,
                 timeout=10
@@ -590,8 +613,12 @@ class SystemTool(BaseTool):
             
             return ToolResult(success=True, data=data)
         
+        except subprocess.TimeoutExpired:
+            return ToolResult(success=False, error="Disk usage check timed out")
         except Exception as e:
-            return ToolResult(success=False, error=str(e))
+            safe_path = sanitize_path_for_display(path)
+            logger.error(f"Disk usage error for path {safe_path}: {e}")
+            return ToolResult(success=False, error=f"Failed to get disk usage: {str(e)}")
     
     async def _memory_info(self) -> ToolResult:
         """Get memory information"""
