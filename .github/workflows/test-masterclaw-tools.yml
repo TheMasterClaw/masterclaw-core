@@ -86,18 +86,27 @@ jobs:
 
     - name: Run security-focused tests
       run: |
-        echo "=== Running Path Security Tests ==="
-        node --test tests/path-security.test.js
+        echo "=== Running Services Security Tests ==="
+        node --test tests/services.security.test.js
         echo ""
-        echo "=== Running SSL Security Tests ==="
-        node --test tests/ssl-security.test.js
+        echo "=== Running Docker Security Tests ==="
+        node --test tests/docker.security.test.js
         echo ""
-        echo "=== Running Audit Security Tests ==="
-        node --test tests/audit-security.test.js
+        echo "=== Running Exec Security Tests ==="
+        node --test tests/exec.security.test.js
+        echo ""
+        echo "=== Running Audit Integrity Tests ==="
+        node --test tests/audit.integrity.test.js
         echo ""
         echo "=== Running HTTP Client Security Tests ==="
         node --test tests/http-client.test.js
-      timeout-minutes: 5
+        echo ""
+        echo "=== Running Chat Security Tests ==="
+        node --test tests/chat-security.test.js
+        echo ""
+        echo "=== Running Import Security Tests ==="
+        node --test tests/import.security.test.js
+      timeout-minutes: 10
 
     - name: Verify security module exports
       run: |
@@ -107,13 +116,19 @@ jobs:
           console.log('Exported functions:', Object.keys(security));
           
           // Verify key security functions exist
-          const required = ['validatePath', 'validateInfraDir', 'validateFileName', 'sanitizePathForDisplay'];
+          const required = ['sanitizeForLog', 'maskSensitiveData', 'secureLogString', 'isSafeString', 'isValidIpAddress', 'isValidHostname', 'containsPathTraversal', 'sanitizeFilename', 'constantTimeCompare', 'safeJsonParse', 'safeJsonStringify'];
+          let missing = [];
           for (const fn of required) {
             if (typeof security[fn] !== 'function') {
               console.error('❌ Missing required function:', fn);
-              process.exit(1);
+              missing.push(fn);
+            } else {
+              console.log('✅', fn, 'is exported');
             }
-            console.log('✅', fn, 'is exported');
+          }
+          if (missing.length > 0) {
+            console.error('❌ Missing functions:', missing.join(', '));
+            process.exit(1);
           }
           console.log('✅ All security functions verified');
         "
@@ -126,4 +141,63 @@ jobs:
           console.log('Exported functions:', Object.keys(audit));
           console.log('AuditEventTypes:', Object.keys(audit.AuditEventType || {}));
           console.log('✅ Audit module verified');
+        "
+
+    - name: Test error handler functionality
+      run: |
+        node -e "
+          const errorHandler = require('./lib/error-handler.js');
+          console.log('✅ Error handler module loaded successfully');
+          console.log('Exported functions:', Object.keys(errorHandler));
+          
+          // Verify key error handling functions exist
+          const required = ['wrapCommand', 'setupGlobalErrorHandlers', 'displayError', 'classifyError', 'getUserMessage', 'getSuggestion', 'auditLogError'];
+          let missing = [];
+          for (const fn of required) {
+            if (typeof errorHandler[fn] !== 'function') {
+              console.error('❌ Missing required function:', fn);
+              missing.push(fn);
+            } else {
+              console.log('✅', fn, 'is exported');
+            }
+          }
+          if (missing.length > 0) {
+            console.error('❌ Missing functions:', missing.join(', '));
+            process.exit(1);
+          }
+          
+          // Verify constants are exported
+          if (!errorHandler.ExitCode || !errorHandler.ErrorCategory) {
+            console.error('❌ Missing ExitCode or ErrorCategory constants');
+            process.exit(1);
+          }
+          console.log('✅ ExitCode constants:', Object.keys(errorHandler.ExitCode));
+          console.log('✅ ErrorCategory constants:', Object.keys(errorHandler.ErrorCategory));
+          console.log('✅ Error handler module verified');
+        "
+
+    - name: Test correlation ID functionality
+      run: |
+        node -e "
+          const correlation = require('./lib/correlation.js');
+          console.log('✅ Correlation module loaded successfully');
+          console.log('Exported functions:', Object.keys(correlation));
+          
+          // Test correlation ID generation
+          const id1 = correlation.generateCorrelationId();
+          const id2 = correlation.generateCorrelationId();
+          console.log('Generated correlation IDs:', id1, id2);
+          
+          if (id1 === id2) {
+            console.error('❌ Correlation IDs should be unique');
+            process.exit(1);
+          }
+          
+          // Test validation
+          const validation = correlation.validateCorrelationId(id1);
+          if (!validation.valid) {
+            console.error('❌ Generated ID should be valid:', validation.error);
+            process.exit(1);
+          }
+          console.log('✅ Correlation ID functionality verified');
         "
