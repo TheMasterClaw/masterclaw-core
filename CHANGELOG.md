@@ -4,6 +4,67 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Added: Workflow Automation System (`mc workflow`) 🔄
+- **New Feature**: Comprehensive workflow automation for operational playbooks
+  - **Purpose**: Define and execute reusable multi-step operational procedures
+  - **Storage**: Workflows stored in `rex-deus/config/workflows/` for version control
+  - **Formats**: Support for YAML (human-friendly) and JSON (programmatic)
+
+- **Workflow Commands**:
+  - `mc workflow list` — List all available workflows with descriptions
+  - `mc workflow show <name>` — Display workflow details and step breakdown
+  - `mc workflow create <name>` — Create from templates (standard, maintenance, incident)
+  - `mc workflow run <name>` — Execute with variable substitution and rollback support
+  - `mc workflow edit <name>` — Open workflow in default editor ($EDITOR)
+  - `mc workflow delete <name>` — Remove workflow (with --force confirmation)
+  - `mc workflow history [name]` — View execution history with timestamps
+  - `mc workflow validate <name>` — Check workflow syntax and structure
+  - `mc workflow export <name>` — Export workflow to stdout or file
+  - `mc workflow import <file>` — Import workflow from external file
+
+- **Workflow Features**:
+  - **Variable Substitution**: Use `${VAR}` or `$VAR` syntax, resolved from workflow vars, CLI args, or environment
+  - **Conditional Execution**: `if` conditions support variable comparisons
+  - **Output Capture**: Save command output to variables for later steps (`capture: VAR_NAME`)
+  - **Rollback Support**: Define rollback steps that execute on workflow failure
+  - **Execution History**: Automatic logging of all runs to `.history/` directory
+  - **Dry-Run Mode**: Preview workflow execution without running commands
+  - **Environment Variables**: Per-step env var configuration
+  - **Working Directory**: Per-step working directory override
+  - **Error Handling**: `continueOnError` option for non-critical steps
+
+- **Built-in Workflow Templates**:
+  - `deploy-standard` — Full deployment with validation, backup, smoke tests, and rollback
+  - `nightly-maintenance` — Scheduled maintenance (log cleanup, pruning, verification)
+  - `incident-response` — Emergency diagnostics and log collection
+
+- **Example Usage**:
+  ```bash
+  # Run deployment workflow
+  mc workflow run deploy-standard
+  
+  # Run with custom variables
+  mc workflow run deploy-standard -V ENV=staging -V SKIP_BACKUP=true
+  
+  # Create and edit custom workflow
+  mc workflow create my-deploy --template standard
+  mc workflow edit my-deploy
+  
+  # Schedule via cron
+  0 2 * * * mc workflow run nightly-maintenance
+  ```
+
+- **Files Added**:
+  - `masterclaw-tools/lib/workflow.js` — Core workflow engine (600+ lines)
+  - `rex-deus/config/workflows/deploy-standard.yaml` — Standard deployment playbook
+  - `rex-deus/config/workflows/nightly-maintenance.yaml` — Maintenance automation
+  - `rex-deus/config/workflows/incident-response.yaml` — Emergency response
+  - `rex-deus/config/workflows/README.md` — Workflow documentation
+
+- **Files Modified**:
+  - `masterclaw-tools/bin/mc.js` — Added workflow command integration
+  - `masterclaw-tools/package.json` — Added js-yaml dependency, version bumped to 0.41.0
+
 ### Security Hardening: Size Module Command Injection Prevention 🔒
 - **Fixed Command Injection Vulnerability** (`masterclaw-tools/lib/size.js`)
   - **Problem**: `getDirectorySize()` and `getDirectoryBreakdown()` used `execSync()` with unsanitized path interpolation
