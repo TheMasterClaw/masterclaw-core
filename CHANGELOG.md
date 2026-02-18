@@ -4,6 +4,42 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Security Hardening: Size Module Command Injection Prevention 🔒
+- **Fixed Command Injection Vulnerability** (`masterclaw-tools/lib/size.js`)
+  - **Problem**: `getDirectorySize()` and `getDirectoryBreakdown()` used `execSync()` with unsanitized path interpolation
+  - **Impact**: Paths from environment variables (`MASTERCLAW_INFRA_DIR`) could potentially execute arbitrary shell commands
+  - **Solution**: Implemented comprehensive path validation and secure command execution
+  
+- **Security Functions Added**:
+  - `isValidPath()`: Validates paths before use, rejects shell metacharacters (`;`, `|`, `&`, `$`, etc.), null bytes, and path traversal (`..`)
+  - `escapeShellArg()`: Escapes double quotes and backslashes for safe shell usage
+  - `validateAndSanitizePath()`: Combined validation with absolute path resolution
+  
+- **Secure Execution**:
+  - Replaced `execSync()` with `execFileSync()` using arguments array (no shell invocation)
+  - Added `shell: false` option to explicitly disable shell interpretation
+  - All paths validated before passing to external commands
+  
+- **Path Traversal Prevention**:
+  - Rejects paths containing `..` components before normalization
+  - Resolves relative paths to absolute before use
+  - Validates environment variable paths before use
+
+- **Error Handling**:
+  - Graceful degradation: returns 0/empty array for invalid paths instead of crashing
+  - Validates `maxDepth` parameter to prevent abuse
+  - Verifies paths are actual directories (not files) before processing
+
+- **Comprehensive Tests**: Added `masterclaw-tools/tests/size.test.js` with **63 tests**:
+  - **18 security tests**: Command injection prevention, path traversal, null byte injection
+  - **12 path validation tests**: Shell metacharacters, environment variables, traversal patterns
+  - **17 functionality tests**: Byte formatting, size parsing, directory calculations
+  - **16 integration tests**: Real filesystem operations with temp directories
+  
+- **Files modified**:
+  - `masterclaw-tools/lib/size.js` — Added security utilities and hardened existing functions
+  - `masterclaw-tools/tests/size.test.js` — New comprehensive test suite (63 tests)
+
 ### Added
 - **Docker System Prune Command** (`mc prune`) 🆕
   - Comprehensive Docker resource management for images, containers, volumes, networks, and build cache
