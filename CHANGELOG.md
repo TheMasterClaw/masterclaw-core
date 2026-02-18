@@ -4,6 +4,88 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Security & Error Handling: HTTP Client Resource Cleanup 🔒
+- **Improved**: Added AbortController support for request cancellation in http-client
+  - **Purpose**: Prevents resource leaks when security validation fails (SSRF, header injection)
+  - **Benefit**: Faster failure response times and proper cleanup of pending requests
+
+- **Technical Changes**:
+  - Added `createAbortController()` helper for managing request timeouts
+  - Request interceptor now creates abort controllers before validation
+  - Cleanup functions are properly called on SSRF validation failures
+  - Cleanup functions are properly called on header validation failures
+  - Response interceptor cleans up abort timers on both success and error
+  - Added try/finally blocks to ensure cleanup happens on all code paths
+
+- **New Tests**:
+  - Test: SSRF validation failure triggers immediate cleanup
+  - Test: Header validation failure triggers immediate cleanup  
+  - Test: Dangerous URL schemes are rejected with proper cleanup
+  - Test: Constants are properly exported for external use
+
+### Added: Dashboard Command (`mc dashboard`) 📊
+- **New Feature**: CLI command to open monitoring dashboards from the terminal
+  - **Purpose**: Quick access to Grafana, Prometheus, Loki, Traefik, and Alertmanager dashboards
+  - **Cross-platform**: Supports macOS, Linux, and Windows with automatic browser detection
+
+- **Dashboard Commands**:
+  - `mc dashboard list` — List all available dashboards with descriptions and URLs
+  - `mc dashboard list --check` — Check if dashboards are accessible
+  - `mc dashboard open <name>` — Open a specific dashboard in the default browser
+  - `mc dashboard open <name> --url-only` — Print URL instead of opening browser
+  - `mc dashboard open <name> -p <path>` — Open with a specific path (e.g., `/explore`)
+  - `mc dashboard grafana` — Shortcut to open Grafana
+  - `mc dashboard prometheus` — Shortcut to open Prometheus
+  - `mc dashboard loki` — Shortcut to open Loki
+  - `mc dashboard traefik` — Shortcut to open Traefik dashboard
+  - `mc dashboard alertmanager` — Shortcut to open Alertmanager
+  - `mc dashboard open-all` — Open all dashboards at once
+  - `mc dashboard config <name> <url>` — Configure custom dashboard URLs
+
+- **Dashboard Features**:
+  - **Smart URL Resolution**: Uses default local URLs or custom configured URLs
+  - **Cross-Platform Browser Opening**: Uses `open` (macOS), `xdg-open` (Linux), or `cmd` (Windows)
+  - **Fallback Browser Detection**: On Linux, tries multiple browsers if xdg-open fails
+  - **Path Support**: Append specific paths like `/explore` or `/graph` to dashboard URLs
+  - **Configuration**: Store custom URLs via `mc dashboard config grafana https://grafana.mycompany.com`
+
+- **Default URLs**:
+  - Grafana: `http://localhost:3003`
+  - Prometheus: `http://localhost:9090`
+  - Loki: `http://localhost:3100`
+  - Traefik: `http://localhost:8080`
+  - Alertmanager: `http://localhost:9093`
+
+- **Example Usage**:
+  ```bash
+  # List all dashboards
+  mc dashboard list
+
+  # Check which dashboards are running
+  mc dashboard list --check
+
+  # Open Grafana
+  mc dashboard open grafana
+  mc dashboard grafana  # shortcut
+
+  # Open Prometheus with specific path
+  mc dashboard open prometheus -p /graph
+
+  # Configure custom Grafana URL
+  mc dashboard config grafana https://grafana.mycompany.com
+
+  # Open all dashboards
+  mc dashboard open-all
+  ```
+
+- **Files Added**:
+  - `masterclaw-tools/lib/dashboard.js` — Dashboard command implementation (400+ lines)
+  - `masterclaw-tools/tests/dashboard.test.js` — Comprehensive test suite (31 tests)
+
+- **Files Modified**:
+  - `masterclaw-tools/bin/mc.js` — Added dashboard command registration
+  - `masterclaw-tools/package.json` — Version bumped to 0.42.0
+
 ### Added: Workflow Automation System (`mc workflow`) 🔄
 - **New Feature**: Comprehensive workflow automation for operational playbooks
   - **Purpose**: Define and execute reusable multi-step operational procedures
