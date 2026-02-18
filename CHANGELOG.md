@@ -5,6 +5,43 @@ All notable changes to MasterClaw Core will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Logger Flush on Process Exit** — Ensures critical logs are persisted during crashes 🆕
+  - Added `flushLogger()` integration in error handler for all exit scenarios
+  - Modified `setupGlobalErrorHandlers()` to flush logs before `process.exit()` on:
+    - `unhandledRejection` — Async errors that crash the process
+    - `uncaughtException` — Synchronous errors that crash the process  
+    - `SIGINT` — User interrupt (Ctrl+C)
+    - `SIGTERM` — Graceful termination signal
+  - Enhanced `logger.flush()` to write buffered messages before closing stream
+  - Enhanced `logger.shutdown()` to flush buffered messages before cleanup
+  - Prevents loss of critical audit logs and security events during unexpected exits
+  - Added comprehensive test suite: `masterclaw-tools/tests/logger.flush.test.js`
+  - **Security**: Security violations and audit events are now guaranteed to be persisted
+  - **Files modified**: `lib/error-handler.js`, `lib/logger.js`
+  - **Files added**: `tests/logger.flush.test.js`
+
+### Added
+- **Intelligent Log Analysis Command** (`mc analyze`) 🆕
+  - New `mc analyze` command for automated log analysis and anomaly detection
+  - **Pattern Detection** — Identifies 9 error categories: runtime, network, resource exhaustion, security, SSL, database, health, performance, rate limiting
+  - **Anomaly Detection** — Detects error spikes (3x average), repeated errors, service error concentration
+  - **Security Analysis** — Flags authentication failures, suspicious access patterns
+  - **Actionable Insights** — Provides specific remediation commands (e.g., `mc doctor`, `mc ssl check`)
+  - **Time window analysis** — Supports 1h, 6h, 24h, 7d windows
+  - **Service-specific analysis** — Analyze specific service or all services
+  - **Subcommands/Options**:
+    - `mc analyze` — Analyze all services (last hour)
+    - `mc analyze --service core` — Analyze specific service
+    - `mc analyze --time 24h` — Analyze last 24 hours
+    - `mc analyze --focus critical` — Focus on critical issues
+    - `mc analyze --focus security` — Focus on security events
+    - `mc analyze --verbose` — Show detailed error patterns
+    - `mc analyze --json` — Output as JSON for automation
+  - **Health scoring** — Overall health status: HEALTHY, DEGRADED, WARNING, CRITICAL
+  - **CI/CD integration** — Returns exit code 1 for critical issues
+  - **New files**: `masterclaw-tools/lib/analyze.js` (module), updated `bin/mc.js` (CLI registration)
+  - Version bump to 0.32.0
+
 - **Real-Time Container Resource Monitor** (`mc top`) 🆕
   - New `mc top` command - like `htop` but for MasterClaw services
   - **Real-time monitoring** — Auto-updating display of container CPU, memory, network I/O
