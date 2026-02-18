@@ -117,6 +117,7 @@
 - `lib/restore.js` - Disaster recovery and backup restoration
 - `lib/cost.js` - **NEW: LLM cost tracking and budget monitoring**
 - `lib/benchmark.js` - **NEW: Performance benchmarking and regression detection**
+- `lib/secrets.js` - **NEW: Secure secrets management for API keys and tokens**
 
 **Commands:**
 ```bash
@@ -129,6 +130,12 @@ mc deploy rolling   # Zero-downtime blue-green deployment
 mc deploy canary 10 # Canary deployment (10% traffic)
 mc deploy rollback  # Rollback to previous version
 mc deploy status    # Show deployment status
+mc secrets check    # Validate all required secrets are configured
+mc secrets list     # List configured secrets (masked)
+mc secrets set KEY VALUE  # Securely store a secret
+mc secrets rotate GATEWAY_TOKEN  # Rotate a secret
+mc secrets validate OPENAI_API_KEY  # Test API key validity
+mc secrets sync     # Sync secrets to .env file
 mc exec mc-core "python --version"  # Execute commands in containers
 mc exec mc-core sh --shell          # Interactive shell in container
 mc containers       # List running containers

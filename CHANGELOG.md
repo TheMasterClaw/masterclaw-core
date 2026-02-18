@@ -4,14 +4,22 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-- **Circuit Breaker Audit Logging** - Fixed undefined `getAudit()` function error
-  - Resolved ReferenceError when circuit breaker transitions between states
-  - Import `logAudit` directly from audit module instead of undefined `getAudit()`
-  - Fixed 15 test failures in circuit-breaker.test.js
-  - Ensures audit events are properly logged when circuits open/close
-
 ### Added
+- **Secrets Management Module (`mc secrets`)** - Secure, centralized secrets management for the MasterClaw ecosystem
+  - `mc secrets check` — Validate all required secrets are configured across CLI and .env
+  - `mc secrets list` — Display configured secrets with masking (never shows full values)
+  - `mc secrets set <key> <value>` — Securely store secrets with format validation
+  - `mc secrets get <key>` — Retrieve secret metadata with masked value
+  - `mc secrets delete <key>` — Remove secrets with confirmation
+  - `mc secrets rotate <key>` — Generate new tokens or rotate API keys
+  - `mc secrets validate <key>` — Test secrets against their services (OpenAI, Anthropic, Gateway)
+  - `mc secrets sync` — Synchronize secrets between CLI storage and .env file
+  - `mc secrets export` — Export secrets (masked) for backup or documentation
+  - Security: File permissions 0o600, masked display by default, audit logging without values
+  - Validation: Enforces API key formats (OpenAI: `sk-...`, Anthropic: `sk-ant-...`)
+  - Token generation: Cryptographically secure random token generation for GATEWAY_TOKEN
+  - Required secrets tracking: GATEWAY_TOKEN (required), OPENAI_API_KEY, ANTHROPIC_API_KEY (optional)
+  - New `lib/secrets.js` module with comprehensive test suite (`tests/secrets.test.js`)
 - **Correlation ID System** - Distributed tracing for CLI operations
   - Unique correlation IDs generated for each command execution
   - IDs propagated through logger, audit log, and event systems
