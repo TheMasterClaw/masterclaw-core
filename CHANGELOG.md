@@ -4,7 +4,41 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Alias Management Command** (`masterclaw-tools/lib/alias.js`)
+  - New `mc alias` command for managing CLI aliases and shortcuts
+  - **Command aliases**: Short aliases for frequently used commands (e.g., `s` → `status`, `l` → `logs`)
+  - **Shell shortcuts**: Full shell commands for complex workflows
+  - **Subcommands**:
+    - `mc alias list` - Show all aliases and shortcuts (with `--json` option)
+    - `mc alias run <name>` - Execute an alias or shortcut
+    - `mc alias add <name> <command>` - Add new command alias
+    - `mc alias add <name> <command> --shortcut` - Add shell shortcut
+    - `mc alias show <name>` - Display alias details
+    - `mc alias remove <name>` - Delete an alias
+    - `mc alias export [file]` - Export aliases to JSON
+    - `mc alias import <file>` - Import aliases (with `--merge` option)
+    - `mc alias reset --force` - Reset to defaults
+  - **Default aliases**: 17 pre-configured aliases (s, st, l, log, b, bk, r, u, d, cfg, ex, ev, nt, perf, sm, val)
+  - **Default shortcuts**: 7 pre-configured shortcuts (deploy, logs-backend, logs-core, logs-gateway, quick-status, full-backup, health-watch)
+  - **Security features**: Rate limiting on all operations, input validation for alias names
+  - **Integration**: Stores aliases in rex-deus config (`~/.openclaw/workspace/rex-deus/config/aliases.json`)
+  - Version bump to 0.27.0
+
 ### Security Hardening & Reliability Improvements
+- **Test Framework Standardization** (`masterclaw-tools/tests/http-client.test.js`)
+  - Converted test file from `node:test` to Jest framework for consistency
+  - Fixed failing test by properly importing SERVICES from services module
+  - Standardized test syntax with Jest matchers (toBe, toHaveLength, etc.)
+  - Improved test organization with clear describe blocks
+  - All 20 tests now pass successfully
+- **Memory ID Generation Security** (`masterclaw_core/memory.py`)
+  - **Replaced MD5 with SHA-256** for memory ID generation in both backends
+    - MD5 is cryptographically broken and vulnerable to collision attacks
+    - SHA-256 provides 256-bit security vs MD5's broken 128-bit (effectively 64-bit) security
+    - IDs remain 32 hex characters for backward compatibility (truncated SHA-256)
+    - Updated `ChromaBackend.add()` and `JSONBackend.add()` methods
+    - No breaking changes - existing IDs remain valid, new IDs use stronger algorithm
 - **Performance Module Security Enhancements** (`lib/performance.js`)
   - **Input validation** for all numeric parameters (`n`, `limit`) with DoS protection
     - Bounds checking prevents excessive values (max 100 endpoints, 1000 profiles)
