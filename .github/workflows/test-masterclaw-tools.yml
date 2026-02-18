@@ -64,7 +64,12 @@ jobs:
       run: npm ci
 
     - name: Run ESLint
-      run: npm run lint || true
+      run: |
+        echo "::group::ESLint Report"
+        npm run lint || true
+        echo "::endgroup::"
+        echo "Note: ESLint configuration added. Fix linting issues to enforce clean builds."
+      continue-on-error: true
 
   security-scan:
     runs-on: ubuntu-latest
