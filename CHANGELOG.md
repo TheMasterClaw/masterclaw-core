@@ -4,6 +4,84 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Docker System Prune Command** (`mc prune`) 🆕
+  - Comprehensive Docker resource management for images, containers, volumes, networks, and build cache
+  - **Disk usage overview**: Shows total usage, reclaimable space, and percentage savings by category
+  - **Selective pruning**: Target specific resources with `--images`, `--containers`, `--volumes`, `--cache`, `--networks`
+  - **Dry-run mode**: Preview what would be pruned without removing anything (`--dry-run`)
+  - **Safety features**:
+    - MasterClaw service protection (containers starting with `mc-` are never pruned)
+    - Confirmation prompts before destructive operations (skip with `--force`)
+    - Dangling-only option for safe image cleanup (`--dangling-only`)
+  - **Subcommands**:
+    - `mc prune` — Show disk usage overview
+    - `mc prune --images` — Prune unused images
+    - `mc prune --containers` — Prune stopped containers
+    - `mc prune --volumes` — Prune unused volumes
+    - `mc prune --cache` — Prune build cache
+    - `mc prune --all` — Prune everything
+    - `mc prune --dry-run` — Preview mode
+    - `mc prune quick` — Quick prune with safe defaults (dangling images + stopped containers + unused networks)
+    - `mc prune detail` — Show detailed resource breakdown
+  - **Smart recommendations**: Suggests pruning when >1GB reclaimable or >50% image space wasted
+  - **Comprehensive tests**: Added `masterclaw-tools/tests/prune.test.js` with 44 tests
+  - **New files**:
+    - `masterclaw-tools/lib/prune.js` — Prune command implementation (649 lines)
+    - `masterclaw-tools/tests/prune.test.js` — Test suite (44 tests)
+  - **Modified files**:
+    - `masterclaw-tools/bin/mc.js` — Added prune command registration
+    - `masterclaw-tools/package.json` — Version bump to 0.37.0
+
+- **Quickstart Wizard** (`mc quickstart`) 🆕
+  - Interactive project bootstrap wizard for new MasterClaw projects
+  - **Three templates**: Minimal, Standard, and Complete project setups
+  - **Interactive prompts**: Project name, template selection, LLM provider, Docker/git options
+  - **Automatic setup**:
+    - Directory structure (data/, memory/, skills/, logs/)
+    - Configuration files (.env, config.json)
+    - Docker Compose setup (optional)
+    - Sample memory files
+    - Git initialization (optional)
+  - **LLM provider presets**: OpenAI, Anthropic, Google, Ollama
+  - **Non-interactive mode**: Use `--yes` flag for defaults
+  - **Complete template extras**: Backup scripts, CI/CD workflows, health checks
+  - **New files**:
+    - `masterclaw-tools/lib/quickstart.js` — Quickstart command implementation
+  - **Modified files**:
+    - `masterclaw-tools/bin/mc.js` — Added quickstart command registration
+    - `masterclaw-tools/package.json` — Version bump to 0.36.0
+
+### Security Hardening: Contacts Input Validation 🔒
+- **Comprehensive Input Validation** (`masterclaw-tools/lib/contacts.js`)
+  - **Contact Name Validation**: Max 100 chars, control character rejection, special character ratio limits (>30% rejected)
+  - **Email Validation**: RFC 5322 compliant format checking
+  - **Phone Validation**: International format support with digit/character filtering
+  - **URL Validation**: Scheme enforcement (http/https only), blocks `javascript:` and other dangerous schemes
+  - **Tag Validation**: Alphanumeric with hyphens only, max 50 chars per tag
+  - **Search Query Validation**: Regex special character sanitization (ReDoS prevention), max 200 chars
+  - **Export Filename Validation**: Path traversal prevention (`../`, `..\` blocked), basename extraction
+
+- **Data Sanitization**:
+  - All loaded contacts automatically sanitized to prevent injection from tampered files
+  - Markdown sanitization for safe rendering (escapes `*`, `_`, `[`, `]`, etc.)
+  - CSV injection prevention: Formula characters (`=`, `+`, `-`, `@`) prefixed with single quote
+  - Truncation of oversized fields (DoS prevention)
+  - Filtering of invalid contact methods and tags
+
+- **Security Tests**: Added `masterclaw-tools/tests/contacts.validation.test.js` with 41 tests covering:
+  - Name validation (empty, control chars, length, special char ratio)
+  - Email/phone/URL format validation
+  - Tag and search query validation
+  - Export filename security (path traversal)
+  - Markdown sanitization
+  - Contact object sanitization
+  - CSV injection prevention
+
+- **Documentation**: Updated `SECURITY.md` with contacts security section
+- **Files modified**: `masterclaw-tools/lib/contacts.js`
+- **Files added**: `masterclaw-tools/tests/contacts.validation.test.js` (41 tests)
+
 ### Security & Error Handling Improvements
 - **Client Generator Security Hardening** (`masterclaw-tools/lib/client.js`) 🔒
   - **SSRF Protection**: Replaced raw `axios` with secure `http-client` that validates URLs against SSRF attacks
