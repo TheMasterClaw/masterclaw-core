@@ -4,6 +4,54 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Added: Terraform Infrastructure Management (`mc terraform`) 🏗️
+- **New Feature**: Complete Terraform Infrastructure as Code (IaC) management via CLI
+  - **Purpose**: Bridge the gap between Terraform infrastructure code and CLI usability
+  - **Benefit**: Deploy and manage AWS cloud infrastructure without leaving the terminal
+
+- **New Commands**:
+  - `mc terraform status` — Show Terraform status and environment information
+    - Check prerequisites (Terraform, AWS CLI)
+    - View initialization status and workspace
+    - Show cluster endpoints if deployed
+    - JSON output support with `--json`
+  - `mc terraform env` — List available environments (dev, staging, prod)
+  - `mc terraform init` — Initialize Terraform for an environment
+    - Support for `--upgrade` to update providers
+    - Support for `--reconfigure` for backend changes
+  - `mc terraform validate` — Validate Terraform configuration files
+  - `mc terraform plan` — Show execution plan
+    - Save plans to file with `-o, --output`
+    - Support for `--destroy` planning
+  - `mc terraform apply` — Apply Terraform changes
+    - Production warnings before apply
+    - Auto-approve option for automation (`--auto-approve`)
+    - Apply saved plans with `-p, --plan`
+    - Target specific resources with `--target`
+  - `mc terraform destroy` — Destroy infrastructure (with safety confirmations)
+    - Explicit confirmation required for production
+    - Target specific resources with `--target`
+  - `mc terraform output` — Show Terraform outputs
+    - JSON output support (`--json`)
+    - Raw single value output (`--raw`)
+    - Connection details and endpoints
+  - `mc terraform kubeconfig` — Configure kubectl for EKS cluster
+    - Automatic cluster name detection
+    - Custom region support (`--region`)
+
+- **Features**:
+  - Environment management for dev, staging, and production
+  - Pre-flight validation before operations
+  - Production safety checks (explicit confirmation for destroy)
+  - Automatic kubectl configuration for EKS clusters
+  - Structured JSON output for automation
+  - Comprehensive error handling with actionable messages
+
+- **Files Added**:
+  - `lib/terraform.js` - Complete Terraform management module (~700 lines)
+  - Updated `bin/mc.js` - Registered `mc terraform` command
+  - Updated `README.md` - Added comprehensive documentation
+
 ### Added: Cost Budget Alert System (`mc cost budget-*`) 💰
 - **New Feature**: Comprehensive budget management with automated alerts and notifications
   - **Purpose**: Prevent surprise LLM bills by proactively monitoring spending against defined budgets

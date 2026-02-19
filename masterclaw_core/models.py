@@ -464,3 +464,52 @@ class LogEntry(BaseModel):
     correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional log metadata")
 
+
+class MaintenanceTask(str, Enum):
+    """Available maintenance tasks"""
+    SESSION_CLEANUP = "session_cleanup"
+    HEALTH_HISTORY_CLEANUP = "health_history_cleanup"
+    MEMORY_OPTIMIZE = "memory_optimize"
+    CACHE_CLEAR = "cache_clear"
+    ALL = "all"
+
+
+class MaintenanceRequest(BaseModel):
+    """Request model for system maintenance operations"""
+    task: MaintenanceTask = Field(..., description="Maintenance task to perform")
+    dry_run: bool = Field(False, description="Preview changes without applying")
+    days: Optional[int] = Field(30, ge=1, le=365, description="Retention period in days for cleanup tasks")
+    force: bool = Field(False, description="Force operation even if checks fail")
+
+
+class MaintenanceResult(BaseModel):
+    """Result of a maintenance operation"""
+    task: str = Field(..., description="Task that was performed")
+    success: bool = Field(..., description="Whether the task succeeded")
+    items_processed: int = Field(0, description="Number of items processed")
+    items_deleted: int = Field(0, description="Number of items deleted")
+    duration_ms: float = Field(..., description="Operation duration in milliseconds")
+    message: str = Field(..., description="Human-readable result message")
+    error: Optional[str] = Field(None, description="Error message if task failed")
+
+
+class MaintenanceResponse(BaseModel):
+    """Response model for system maintenance operations"""
+    success: bool = Field(..., description="Whether all tasks succeeded")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    dry_run: bool = Field(..., description="Whether this was a dry run")
+    results: List[MaintenanceResult] = Field(default_factory=list, description="Results for each task")
+    summary: Dict[str, Any] = Field(default_factory=dict, description="Overall summary")
+
+
+class MaintenanceStatusResponse(BaseModel):
+    """Response model for maintenance status"""
+    last_maintenance: Optional[datetime] = Field(None, description="When maintenance was last run")
+    next_scheduled: Optional[datetime] = Field(None, description="When maintenance is next scheduled")
+    health_history_count: int = Field(0, description="Number of health history records")
+    old_health_records: int = Field(0, description="Number of health records older than retention period")
+    session_count: int = Field(0, description="Total number of sessions")
+    old_sessions: int = Field(0, description="Number of sessions older than retention period")
+    cache_stats: Dict[str, Any] = Field(default_factory=dict, description="Cache statistics")
+    recommendations: List[str] = Field(default_factory=list, description="Maintenance recommendations")
+

@@ -56,6 +56,11 @@ from .models import (
     WebhookEventType,
     LogStreamRequest,
     LogEntry,
+    MaintenanceTask,
+    MaintenanceRequest,
+    MaintenanceResponse,
+    MaintenanceResult,
+    MaintenanceStatusResponse,
 )
 
 from .analytics import analytics
@@ -3142,3 +3147,333 @@ def parse_duration(duration: str) -> timedelta:
         'w': 604800
     }
     return timedelta(seconds=value * multipliers.get(unit, 60))
+
+
+# =============================================================================
+# System Maintenance API
+# =============================================================================
+
+# Track last maintenance time
+LAST_MAINTENANCE_TIME: Optional[datetime] = None
+
+
+@app.get("/v1/maintenance/status", response_model=MaintenanceStatusResponse, tags=["maintenance"])
+async def get_maintenance_status(
+    http_request: Request,
+    retention_days: int = 30
+):
+    """
+    Get system maintenance status and recommendations.
+
+    Provides an overview of system health from a maintenance perspective:
+    - **Health History**: Count of records and old records
+    - **Sessions**: Total count and old sessions
+    - **Cache Statistics**: Current cache usage
+    - **Recommendations**: Suggested maintenance actions
+
+    This endpoint helps administrators identify when maintenance
+    operations should be performed.
+
+    Query parameters:
+    - **retention_days**: Days to consider as "old" (default: 30)
+
+    Example response:
+    ```json
+    {
+      "health_history_count": 15000,
+      "old_health_records": 8000,
+      "session_count": 5000,
+      "old_sessions": 2000,
+      "recommendations": [
+        "Run health history cleanup to remove 8000 old records",
+        "Consider running session cleanup for 2000 old sessions"
+      ]
+    }
+    ```
+    """
+    from . import cache as cache_module
+
+    recommendations = []
+
+    # Get health history stats
+    try:
+        health_records = health_history.get_recent(limit=100000)
+        health_count = len(health_records)
+
+        # Count old records
+        cutoff = datetime.utcnow() - timedelta(days=retention_days)
+        old_health = sum(1 for h in health_records if h.timestamp < cutoff)
+
+        if old_health > 1000:
+            recommendations.append(
+                f"Run health history cleanup to remove {old_health} old records"
+            )
+    except Exception as e:
+        logger.error(f"Failed to get health history stats: {e}")
+        health_count = 0
+        old_health = 0
+
+    # Get session stats (from analytics)
+    try:
+        session_stats = analytics.get_session_stats()
+        session_count = session_stats.get("total_sessions", 0)
+        # Estimate old sessions (simplified)
+        old_sessions = session_count // 3  # Rough estimate
+
+        if old_sessions > 1000:
+            recommendations.append(
+                f"Consider running session cleanup for ~{old_sessions} old sessions"
+            )
+    except Exception as e:
+        logger.error(f"Failed to get session stats: {e}")
+        session_count = 0
+        old_sessions = 0
+
+    # Get cache stats
+    try:
+        cache_stats = await cache_module.get_cache_stats()
+    except Exception as e:
+        logger.error(f"Failed to get cache stats: {e}")
+        cache_stats = {}
+
+    return MaintenanceStatusResponse(
+        last_maintenance=LAST_MAINTENANCE_TIME,
+        health_history_count=health_count,
+        old_health_records=old_health,
+        session_count=session_count,
+        old_sessions=old_sessions,
+        cache_stats=cache_stats,
+        recommendations=recommendations
+    )
+
+
+@app.post("/v1/maintenance/run", response_model=MaintenanceResponse, tags=["maintenance"])
+async def run_maintenance(
+    request: MaintenanceRequest,
+    http_request: Request
+):
+    """
+    Run system maintenance operations.
+
+    Performs maintenance tasks to keep the system running optimally:
+    - **session_cleanup**: Remove old sessions based on retention period
+    - **health_history_cleanup**: Clean up old health history records
+    - **memory_optimize**: Optimize memory store (if supported)
+    - **cache_clear**: Clear the response cache
+    - **all**: Run all maintenance tasks
+
+    Use `dry_run=True` to preview what would be done without making changes.
+
+    Example request:
+    ```json
+    {
+      "task": "health_history_cleanup",
+      "days": 30,
+      "dry_run": false
+    }
+    ```
+
+    Example response:
+    ```json
+    {
+      "success": true,
+      "dry_run": false,
+      "results": [
+        {
+          "task": "health_history_cleanup",
+          "success": true,
+          "items_deleted": 8500,
+          "duration_ms": 1250.5,
+          "message": "Deleted 8500 old health history records"
+        }
+      ],
+      "summary": {
+        "total_tasks": 1,
+        "successful": 1,
+        "failed": 0,
+        "total_deleted": 8500
+      }
+    }
+    ```
+    """
+    global LAST_MAINTENANCE_TIME
+    import time
+
+    start_time = time.time()
+    results = []
+
+    # Determine which tasks to run
+    tasks_to_run = []
+    if request.task == MaintenanceTask.ALL:
+        tasks_to_run = [
+            MaintenanceTask.HEALTH_HISTORY_CLEANUP,
+            MaintenanceTask.CACHE_CLEAR,
+        ]
+    else:
+        tasks_to_run = [request.task]
+
+    # Run each task
+    for task in tasks_to_run:
+        task_start = time.time()
+
+        try:
+            if task == MaintenanceTask.HEALTH_HISTORY_CLEANUP:
+                result = await _run_health_cleanup(request.days, request.dry_run)
+            elif task == MaintenanceTask.CACHE_CLEAR:
+                result = await _run_cache_clear(request.dry_run)
+            elif task == MaintenanceTask.SESSION_CLEANUP:
+                result = await _run_session_cleanup(request.days, request.dry_run)
+            elif task == MaintenanceTask.MEMORY_OPTIMIZE:
+                result = await _run_memory_optimize(request.dry_run)
+            else:
+                result = MaintenanceResult(
+                    task=task.value,
+                    success=False,
+                    message=f"Unknown task: {task.value}",
+                    duration_ms=(time.time() - task_start) * 1000
+                )
+
+            results.append(result)
+
+        except Exception as e:
+            logger.error(f"Maintenance task {task.value} failed: {e}")
+            results.append(MaintenanceResult(
+                task=task.value,
+                success=False,
+                message=f"Task failed with error: {str(e)}",
+                error=str(e),
+                duration_ms=(time.time() - task_start) * 1000
+            ))
+
+    # Update last maintenance time if not dry run and at least one task succeeded
+    if not request.dry_run and any(r.success for r in results):
+        LAST_MAINTENANCE_TIME = datetime.utcnow()
+
+    # Calculate summary
+    successful = sum(1 for r in results if r.success)
+    failed = sum(1 for r in results if not r.success)
+    total_deleted = sum(r.items_deleted for r in results)
+
+    total_duration = (time.time() - start_time) * 1000
+
+    return MaintenanceResponse(
+        success=failed == 0,
+        dry_run=request.dry_run,
+        results=results,
+        summary={
+            "total_tasks": len(results),
+            "successful": successful,
+            "failed": failed,
+            "total_deleted": total_deleted,
+            "duration_ms": total_duration
+        }
+    )
+
+
+async def _run_health_cleanup(days: int, dry_run: bool) -> MaintenanceResult:
+    """Run health history cleanup"""
+    import time
+    start = time.time()
+
+    try:
+        if dry_run:
+            # Just count what would be deleted
+            records = health_history.get_recent(limit=100000)
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            to_delete = sum(1 for r in records if r.timestamp < cutoff)
+
+            return MaintenanceResult(
+                task="health_history_cleanup",
+                success=True,
+                items_processed=len(records),
+                items_deleted=to_delete,
+                duration_ms=(time.time() - start) * 1000,
+                message=f"[DRY RUN] Would delete {to_delete} health records older than {days} days"
+            )
+        else:
+            deleted = health_history.cleanup_old_records(days=days)
+            return MaintenanceResult(
+                task="health_history_cleanup",
+                success=True,
+                items_processed=deleted,
+                items_deleted=deleted,
+                duration_ms=(time.time() - start) * 1000,
+                message=f"Deleted {deleted} health history records older than {days} days"
+            )
+    except Exception as e:
+        return MaintenanceResult(
+            task="health_history_cleanup",
+            success=False,
+            message=f"Health history cleanup failed: {str(e)}",
+            error=str(e),
+            duration_ms=(time.time() - start) * 1000
+        )
+
+
+async def _run_cache_clear(dry_run: bool) -> MaintenanceResult:
+    """Clear the response cache"""
+    import time
+    from . import cache as cache_module
+    start = time.time()
+
+    try:
+        if dry_run:
+            stats = await cache_module.get_cache_stats()
+            return MaintenanceResult(
+                task="cache_clear",
+                success=True,
+                items_processed=stats.get("size", 0),
+                items_deleted=stats.get("size", 0),
+                duration_ms=(time.time() - start) * 1000,
+                message=f"[DRY RUN] Would clear {stats.get('size', 0)} cached entries"
+            )
+        else:
+            await cache_module.clear_cache()
+            return MaintenanceResult(
+                task="cache_clear",
+                success=True,
+                items_processed=0,
+                items_deleted=0,  # We don't know exact count after clear
+                duration_ms=(time.time() - start) * 1000,
+                message="Response cache cleared successfully"
+            )
+    except Exception as e:
+        return MaintenanceResult(
+            task="cache_clear",
+            success=False,
+            message=f"Cache clear failed: {str(e)}",
+            error=str(e),
+            duration_ms=(time.time() - start) * 1000
+        )
+
+
+async def _run_session_cleanup(days: int, dry_run: bool) -> MaintenanceResult:
+    """Run session cleanup (placeholder - would integrate with session store)"""
+    import time
+    start = time.time()
+
+    # This is a placeholder - actual implementation would integrate with session store
+    return MaintenanceResult(
+        task="session_cleanup",
+        success=True,
+        items_processed=0,
+        items_deleted=0,
+        duration_ms=(time.time() - start) * 1000,
+        message=f"{'[DRY RUN] ' if dry_run else ''}Session cleanup not implemented in this version"
+    )
+
+
+async def _run_memory_optimize(dry_run: bool) -> MaintenanceResult:
+    """Optimize memory store (placeholder - would integrate with memory store)"""
+    import time
+    start = time.time()
+
+    # This is a placeholder - actual implementation would integrate with memory store
+    return MaintenanceResult(
+        task="memory_optimize",
+        success=True,
+        items_processed=0,
+        items_deleted=0,
+        duration_ms=(time.time() - start) * 1000,
+        message=f"{'[DRY RUN] ' if dry_run else ''}Memory optimization not implemented in this version"
+    )

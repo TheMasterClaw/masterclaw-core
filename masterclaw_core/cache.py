@@ -315,6 +315,16 @@ def generate_cache_key(*parts: str) -> str:
     return hashlib.sha256(combined.encode()).hexdigest()[:32]
 
 
+async def get_cache_stats() -> Dict[str, Any]:
+    """Get cache statistics (async wrapper for cache.stats())"""
+    return cache.stats()
+
+
+async def clear_cache() -> bool:
+    """Clear all cached data (async wrapper for cache.clear())"""
+    return cache.clear()
+
+
 class LLMCache:
     """Cache for LLM responses"""
     

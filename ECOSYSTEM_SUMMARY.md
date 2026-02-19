@@ -120,6 +120,7 @@
 - `lib/cost.js` - **NEW: LLM cost tracking and budget monitoring**
 - `lib/benchmark.js` - **NEW: Performance benchmarking and regression detection**
 - `lib/secrets.js` - **NEW: Secure secrets management for API keys and tokens**
+- `lib/terraform.js` - **NEW: Terraform infrastructure management for AWS deployments**
 
 **Commands:**
 ```bash
@@ -207,6 +208,15 @@ mc audit -t SECURITY_VIOLATION  # Filter by event type
 mc audit -s error   # Filter by severity
 mc audit --verify   # Verify entry signatures
 mc audit-verify     # Verify audit log integrity
+mc k8s deploy       # Deploy to Kubernetes cluster
+mc k8s status       # Show Kubernetes deployment status
+mc k8s logs -c core # View Kubernetes logs
+mc terraform status # Show Terraform infrastructure status
+mc terraform init   # Initialize Terraform
+mc terraform plan   # Plan Terraform changes
+mc terraform apply  # Apply Terraform changes
+mc terraform output # Show Terraform outputs
+mc terraform kubeconfig  # Configure kubectl for cluster
 ```
 
 ---
