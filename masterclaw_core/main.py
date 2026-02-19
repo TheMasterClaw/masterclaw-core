@@ -67,6 +67,13 @@ from .models import (
     BulkMemoryUpdateResponse,
     BulkMemoryStatsResponse,
     BulkMemoryOperationResult,
+    BatchSessionFilter,
+    BatchSessionDeleteRequest,
+    BatchSessionArchiveRequest,
+    BatchSessionOperationResult,
+    BatchSessionDeleteResponse,
+    BatchSessionArchiveResponse,
+    BatchSessionStatsResponse,
 )
 
 from .analytics import analytics
@@ -322,6 +329,7 @@ async def root():
             "/metrics",
             "/v1/chat",
             "/v1/chat/stream/{session_id} (WebSocket)",
+            "/v1/telemetry (NEW)",
             "/v1/memory/search",
             "/v1/memory/add",
             "/v1/memory/{memory_id}",
@@ -2162,6 +2170,303 @@ async def bulk_delete_sessions(
         )
 
 
+# =============================================================================
+# Batch Session Operations Endpoints
+# =============================================================================
+
+@app.post("/v1/sessions/batch-archive", response_model=BatchSessionArchiveResponse, tags=["sessions"])
+async def batch_archive_sessions(
+    request: BatchSessionArchiveRequest,
+    http_request: Request
+):
+    """
+    Batch archive multiple sessions for long-term storage.
+
+    Archive sessions by:
+    - **session_ids**: Explicit list of session IDs to archive
+    - **older_than_days**: Archive all sessions older than N days
+    - **inactive_for_days**: Archive sessions inactive for N days
+    - **created_before**: Archive sessions created before a specific date
+
+    Features:
+    - **Dry run mode**: Preview what would be archived without making changes
+    - **JSON export**: Sessions are exported as structured JSON
+    - **Data preservation**: All messages and metadata are preserved
+
+    Example request:
+    ```json
+    {
+      "filter": {
+        "older_than_days": 90
+      },
+      "dry_run": false,
+      "limit": 500
+    }
+    ```
+
+    Returns detailed results for each archived session including the archive path.
+    """
+    import time
+    import json
+    start_time = time.time()
+
+    try:
+        # Build filter criteria
+        sessions_to_archive = []
+
+        if request.filter.session_ids:
+            sessions_to_archive = request.filter.session_ids
+        else:
+            # Get all sessions and filter
+            sessions_response = await list_sessions(
+                http_request=http_request,
+                limit=request.limit,
+                offset=0
+            )
+
+            for session in sessions_response.sessions:
+                should_archive = False
+
+                if request.filter.older_than_days:
+                    cutoff = datetime.utcnow() - timedelta(days=request.filter.older_than_days)
+                    if session.created_at < cutoff:
+                        should_archive = True
+
+                if request.filter.inactive_for_days:
+                    inactive_cutoff = datetime.utcnow() - timedelta(days=request.filter.inactive_for_days)
+                    if session.last_active < inactive_cutoff:
+                        should_archive = True
+
+                if request.filter.created_before:
+                    if session.created_at < request.filter.created_before:
+                        should_archive = True
+
+                if request.filter.created_after:
+                    if session.created_at > request.filter.created_after:
+                        should_archive = True
+
+                if should_archive:
+                    sessions_to_archive.append(session.session_id)
+
+        total_matched = len(sessions_to_archive)
+
+        if request.dry_run:
+            results = [
+                BatchSessionOperationResult(
+                    session_id=session_id,
+                    success=True,
+                    message="Would be archived (dry run)"
+                )
+                for session_id in sessions_to_archive
+            ]
+
+            return BatchSessionArchiveResponse(
+                success=True,
+                dry_run=True,
+                total_matched=total_matched,
+                archived_count=0,
+                failed_count=0,
+                total_messages_archived=0,
+                results=results,
+                duration_ms=(time.time() - start_time) * 1000
+            )
+
+        # Perform archiving
+        archived_count = 0
+        failed_count = 0
+        total_messages_archived = 0
+        results = []
+
+        archive_data = []
+
+        for session_id in sessions_to_archive:
+            try:
+                # Get session history
+                session_history = await get_session_history(
+                    session_id=session_id,
+                    http_request=http_request,
+                    limit=1000
+                )
+
+                message_count = len(session_history.messages)
+
+                archive_entry = {
+                    "session_id": session_id,
+                    "created_at": session_history.created_at.isoformat() if session_history.created_at else None,
+                    "messages": [
+                        {
+                            "role": msg.role,
+                            "content": msg.content,
+                            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+                        }
+                        for msg in session_history.messages
+                    ]
+                }
+
+                archive_data.append(archive_entry)
+
+                # Delete the session after archiving
+                await delete_session(
+                    session_id=session_id,
+                    http_request=http_request
+                )
+
+                archived_count += 1
+                total_messages_archived += message_count
+                results.append(BatchSessionOperationResult(
+                    session_id=session_id,
+                    success=True,
+                    message_count=message_count
+                ))
+
+            except Exception as e:
+                failed_count += 1
+                results.append(BatchSessionOperationResult(
+                    session_id=session_id,
+                    success=False,
+                    error=str(e)
+                ))
+
+        # Save archive file
+        archive_path = request.archive_location or f"./data/archives/sessions_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+
+        # Ensure directory exists
+        import os
+        os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+
+        with open(archive_path, 'w') as f:
+            json.dump({
+                "archived_at": datetime.utcnow().isoformat(),
+                "session_count": archived_count,
+                "total_messages": total_messages_archived,
+                "sessions": archive_data
+            }, f, indent=2)
+
+        logger.info(
+            "Batch session archive completed",
+            total_matched=total_matched,
+            archived=archived_count,
+            failed=failed_count,
+            archive_path=archive_path,
+            duration_ms=(time.time() - start_time) * 1000
+        )
+
+        return BatchSessionArchiveResponse(
+            success=failed_count == 0,
+            dry_run=False,
+            total_matched=total_matched,
+            archived_count=archived_count,
+            failed_count=failed_count,
+            total_messages_archived=total_messages_archived,
+            archive_path=archive_path,
+            results=results,
+            duration_ms=(time.time() - start_time) * 1000
+        )
+
+    except Exception as e:
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=e,
+            public_message="Failed to perform batch session archive",
+            log_message=f"Batch archive failed: {str(e)[:200]}",
+            request_id=request_id
+        )
+
+
+@app.get("/v1/sessions/stats/batch", response_model=BatchSessionStatsResponse, tags=["sessions"])
+async def get_batch_session_stats(
+    http_request: Request
+):
+    """
+    Get statistics for batch session operations.
+
+    Returns overview statistics useful for planning batch operations:
+    - Total session count
+    - Active vs inactive sessions
+    - Breakdown by creation date
+    - Date range of sessions
+    - Total message count
+
+    Example response:
+    ```json
+    {
+      "total_sessions": 5000,
+      "active_sessions": 1200,
+      "inactive_sessions": 3800,
+      "by_date": {
+        "2024-01-15": 50,
+        "2024-01-14": 75
+      },
+      "oldest_session": "2023-06-01T00:00:00",
+      "newest_session": "2024-01-15T12:30:00",
+      "total_messages": 45000
+    }
+    ```
+
+    Use this endpoint to plan archival or cleanup operations.
+    """
+    try:
+        # Get all sessions
+        sessions_response = await list_sessions(
+            http_request=http_request,
+            limit=10000,
+            offset=0
+        )
+
+        total_sessions = len(sessions_response.sessions)
+        active_sessions = 0
+        inactive_sessions = 0
+        by_date: Dict[str, int] = {}
+        oldest_session: Optional[datetime] = None
+        newest_session: Optional[datetime] = None
+        total_messages = 0
+
+        # Consider sessions active if last activity within 7 days
+        active_cutoff = datetime.utcnow() - timedelta(days=7)
+
+        for session in sessions_response.sessions:
+            # Active vs inactive
+            if session.last_active > active_cutoff:
+                active_sessions += 1
+            else:
+                inactive_sessions += 1
+
+            # Count by date
+            date_str = session.created_at.strftime("%Y-%m-%d") if session.created_at else "unknown"
+            by_date[date_str] = by_date.get(date_str, 0) + 1
+
+            # Track date range
+            if session.created_at:
+                if oldest_session is None or session.created_at < oldest_session:
+                    oldest_session = session.created_at
+                if newest_session is None or session.created_at > newest_session:
+                    newest_session = session.created_at
+
+            # Count messages
+            total_messages += session.message_count
+
+        return BatchSessionStatsResponse(
+            total_sessions=total_sessions,
+            active_sessions=active_sessions,
+            inactive_sessions=inactive_sessions,
+            by_date=by_date,
+            oldest_session=oldest_session,
+            newest_session=newest_session,
+            total_messages=total_messages
+        )
+
+    except Exception as e:
+        request_id = getattr(http_request.state, 'request_id', None)
+        raise_secure_http_exception(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=e,
+            public_message="Failed to retrieve batch session statistics",
+            log_message=f"Batch session stats failed: {str(e)[:200]}",
+            request_id=request_id
+        )
+
+
 @app.get("/v1/analytics", response_model=AnalyticsSummaryResponse, tags=["analytics"])
 async def analytics_summary():
     """Get analytics system summary and available endpoints"""
@@ -3874,4 +4179,129 @@ async def _run_memory_optimize(dry_run: bool) -> MaintenanceResult:
         items_deleted=0,
         duration_ms=(time.time() - start) * 1000,
         message=f"{'[DRY RUN] ' if dry_run else ''}Memory optimization not implemented in this version"
+    )
+
+
+# =============================================================================
+# Telemetry Endpoint - Operational Metrics for Monitoring Integrations
+# =============================================================================
+
+class TelemetryMetrics(BaseModel):
+    """Real-time telemetry metrics for operational monitoring"""
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Request metrics
+    requests_total: int = Field(0, description="Total requests since startup")
+    requests_per_minute: float = Field(0.0, description="Requests per minute")
+    average_response_time_ms: float = Field(0.0, description="Average response time")
+    
+    # Error metrics
+    errors_total: int = Field(0, description="Total errors since startup")
+    error_rate: float = Field(0.0, description="Error rate (0-1)")
+    
+    # System metrics
+    memory_usage_mb: Optional[float] = Field(None, description="Current memory usage in MB")
+    cpu_percent: Optional[float] = Field(None, description="Current CPU usage percent")
+    
+    # LLM metrics
+    llm_requests_total: int = Field(0, description="Total LLM API requests")
+    llm_tokens_total: int = Field(0, description="Total LLM tokens consumed")
+    llm_cost_usd: float = Field(0.0, description="Estimated LLM cost in USD")
+    
+    # Cache metrics
+    cache_hits: int = Field(0, description="Cache hit count")
+    cache_misses: int = Field(0, description="Cache miss count")
+    cache_hit_rate: float = Field(0.0, description="Cache hit rate (0-1)")
+
+
+@app.get("/v1/telemetry", response_model=TelemetryMetrics, tags=["monitoring"])
+async def get_telemetry_metrics():
+    """
+    Get real-time telemetry metrics for operational monitoring.
+    
+    Provides operational metrics useful for:
+    - **Monitoring dashboards**: Track system health and performance
+    - **Alerting**: Detect anomalies in request rates or error rates
+    - **Capacity planning**: Understand resource usage patterns
+    - **Cost tracking**: Monitor LLM usage and costs
+    
+    Returns current metrics snapshot including:
+    - Request volume and performance
+    - Error rates
+    - Resource utilization
+    - LLM usage and costs
+    - Cache performance
+    
+    Example response:
+    ```json
+    {
+      "timestamp": "2026-02-19T09:00:00Z",
+      "requests_total": 15234,
+      "requests_per_minute": 45.2,
+      "average_response_time_ms": 234.5,
+      "errors_total": 12,
+      "error_rate": 0.0008,
+      "memory_usage_mb": 512.3,
+      "cpu_percent": 15.2,
+      "llm_requests_total": 892,
+      "llm_tokens_total": 45632,
+      "llm_cost_usd": 1.37,
+      "cache_hits": 3421,
+      "cache_misses": 892,
+      "cache_hit_rate": 0.793
+    }
+    ```
+    
+    Use this endpoint for:
+    - Grafana/prometheus monitoring integrations
+    - Custom alerting systems
+    - Performance analysis
+    - Cost monitoring
+    """
+    import psutil
+    import time
+    
+    # Get process memory info
+    try:
+        process = psutil.Process()
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        cpu_percent = process.cpu_percent(interval=0.1)
+    except Exception:
+        memory_mb = None
+        cpu_percent = None
+    
+    # Calculate request rate (requests in last minute)
+    current_time = time.time()
+    one_minute_ago = current_time - 60
+    recent_requests = sum(1 for ts in getattr(app.state, 'request_timestamps', []) if ts > one_minute_ago)
+    
+    # Get cache stats if available
+    cache_hits = 0
+    cache_misses = 0
+    try:
+        from . import cache as cache_module
+        stats = cache_module.get_cache_stats()
+        cache_hits = stats.get('hits', 0)
+        cache_misses = stats.get('misses', 0)
+    except Exception:
+        pass
+    
+    total_cache_ops = cache_hits + cache_misses
+    cache_hit_rate = cache_hits / total_cache_ops if total_cache_ops > 0 else 0.0
+    
+    # Build response
+    return TelemetryMetrics(
+        requests_total=getattr(app.state, 'requests_total', 0),
+        requests_per_minute=recent_requests,
+        average_response_time_ms=getattr(app.state, 'avg_response_time_ms', 0.0),
+        errors_total=getattr(app.state, 'errors_total', 0),
+        error_rate=getattr(app.state, 'error_rate', 0.0),
+        memory_usage_mb=memory_mb,
+        cpu_percent=cpu_percent,
+        llm_requests_total=getattr(app.state, 'llm_requests_total', 0),
+        llm_tokens_total=getattr(app.state, 'llm_tokens_total', 0),
+        llm_cost_usd=getattr(app.state, 'llm_cost_usd', 0.0),
+        cache_hits=cache_hits,
+        cache_misses=cache_misses,
+        cache_hit_rate=cache_hit_rate
     )

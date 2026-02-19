@@ -354,6 +354,34 @@ class FeatureAvailability(BaseModel):
     description: Optional[str] = Field(None, description="Feature description")
 
 
+class TelemetryMetrics(BaseModel):
+    """Real-time telemetry metrics for operational monitoring"""
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Request metrics
+    requests_total: int = Field(0, description="Total requests since startup")
+    requests_per_minute: float = Field(0.0, description="Requests per minute")
+    average_response_time_ms: float = Field(0.0, description="Average response time")
+    
+    # Error metrics
+    errors_total: int = Field(0, description="Total errors since startup")
+    error_rate: float = Field(0.0, description="Error rate (0-1)")
+    
+    # System metrics
+    memory_usage_mb: Optional[float] = Field(None, description="Current memory usage in MB")
+    cpu_percent: Optional[float] = Field(None, description="Current CPU usage percent")
+    
+    # LLM metrics
+    llm_requests_total: int = Field(0, description="Total LLM API requests")
+    llm_tokens_total: int = Field(0, description="Total LLM tokens consumed")
+    llm_cost_usd: float = Field(0.0, description="Estimated LLM cost in USD")
+    
+    # Cache metrics
+    cache_hits: int = Field(0, description="Cache hit count")
+    cache_misses: int = Field(0, description="Cache miss count")
+    cache_hit_rate: float = Field(0.0, description="Cache hit rate (0-1)")
+
+
 class SystemInfoResponse(BaseModel):
     """Comprehensive system information response"""
     name: str = Field(default="MasterClaw Core", description="Service name")
@@ -591,5 +619,81 @@ class BulkMemoryStatsResponse(BaseModel):
     oldest_memory: Optional[datetime] = Field(None, description="Date of oldest memory")
     newest_memory: Optional[datetime] = Field(None, description="Date of newest memory")
     total_size_estimate: int = Field(0, description="Estimated total size in bytes")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# Batch Session Operations Models
+# =============================================================================
+
+class BatchSessionFilter(BaseModel):
+    """Filter criteria for batch session operations"""
+    session_ids: Optional[List[str]] = Field(None, description="Specific session IDs to target")
+    older_than_days: Optional[int] = Field(None, ge=1, description="Sessions older than N days")
+    inactive_for_days: Optional[int] = Field(None, ge=1, description="Sessions inactive for N days")
+    created_before: Optional[datetime] = Field(None, description="Sessions created before this date")
+    created_after: Optional[datetime] = Field(None, description="Sessions created after this date")
+
+
+class BatchSessionDeleteRequest(BaseModel):
+    """Request model for batch session deletion"""
+    filter: BatchSessionFilter = Field(..., description="Filter criteria for sessions to delete")
+    dry_run: bool = Field(False, description="Preview what would be deleted without actually deleting")
+    limit: int = Field(1000, ge=1, le=5000, description="Maximum number of sessions to delete")
+    preserve_analytics: bool = Field(True, description="Preserve analytics data after deletion")
+
+
+class BatchSessionArchiveRequest(BaseModel):
+    """Request model for batch session archiving"""
+    filter: BatchSessionFilter = Field(..., description="Filter criteria for sessions to archive")
+    dry_run: bool = Field(False, description="Preview what would be archived without actually archiving")
+    limit: int = Field(1000, ge=1, le=5000, description="Maximum number of sessions to archive")
+    archive_location: Optional[str] = Field(None, description="Custom archive location/path")
+
+
+class BatchSessionOperationResult(BaseModel):
+    """Result of a batch session operation"""
+    session_id: str = Field(..., description="Session ID")
+    success: bool = Field(..., description="Whether the operation succeeded")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
+    message_count: int = Field(0, description="Number of messages in the session")
+
+
+class BatchSessionDeleteResponse(BaseModel):
+    """Response model for batch session deletion"""
+    success: bool = Field(..., description="Whether the operation completed successfully")
+    dry_run: bool = Field(..., description="Whether this was a dry run")
+    total_matched: int = Field(0, description="Total sessions matching filter")
+    deleted_count: int = Field(0, description="Number of sessions actually deleted")
+    failed_count: int = Field(0, description="Number of sessions that failed to delete")
+    total_messages_deleted: int = Field(0, description="Total number of messages deleted")
+    results: List[BatchSessionOperationResult] = Field(default_factory=list, description="Individual operation results")
+    duration_ms: float = Field(..., description="Operation duration in milliseconds")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BatchSessionArchiveResponse(BaseModel):
+    """Response model for batch session archiving"""
+    success: bool = Field(..., description="Whether the operation completed successfully")
+    dry_run: bool = Field(..., description="Whether this was a dry run")
+    total_matched: int = Field(0, description="Total sessions matching filter")
+    archived_count: int = Field(0, description="Number of sessions actually archived")
+    failed_count: int = Field(0, description="Number of sessions that failed to archive")
+    total_messages_archived: int = Field(0, description="Total number of messages archived")
+    archive_path: Optional[str] = Field(None, description="Path to archive file/location")
+    results: List[BatchSessionOperationResult] = Field(default_factory=list, description="Individual operation results")
+    duration_ms: float = Field(..., description="Operation duration in milliseconds")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BatchSessionStatsResponse(BaseModel):
+    """Response model for batch session statistics"""
+    total_sessions: int = Field(0, description="Total number of sessions")
+    active_sessions: int = Field(0, description="Number of active sessions")
+    inactive_sessions: int = Field(0, description="Number of inactive sessions")
+    by_date: Dict[str, int] = Field(default_factory=dict, description="Count by creation date (YYYY-MM-DD)")
+    oldest_session: Optional[datetime] = Field(None, description="Date of oldest session")
+    newest_session: Optional[datetime] = Field(None, description="Date of newest session")
+    total_messages: int = Field(0, description="Total number of messages across all sessions")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
