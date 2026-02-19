@@ -2,6 +2,22 @@
 
 The AI brain — LLM integrations, memory systems, agent orchestration, and tool handlers.
 
+## 📇 Master Index
+
+**[INDEX.md](./INDEX.md)** — Master navigation for the entire MasterClaw ecosystem
+
+## Project Links 📎
+
+- [WHATSNEW.md](./WHATSNEW.md) — Latest features and improvements
+- [LICENSE](./LICENSE) — MIT License
+- [CONTRIBUTING](./CONTRIBUTING.md) — How to contribute
+- [CODE_OF_CONDUCT](./CODE_OF_CONDUCT.md) — Community standards
+- [ROADMAP](./ROADMAP.md) — Future development plans
+- [Makefile](./Makefile) — Cross-repo orchestration (run `make help`)
+- [CHEATSHEET.md](./CHEATSHEET.md) — Quick reference for mc commands
+- [Issue Templates](./.github/ISSUE_TEMPLATE/) — Bug reports, features, questions
+- [PR Template](./.github/pull_request_template.md) — Pull request guidelines
+
 ## Quick Start
 
 ```bash
@@ -348,6 +364,84 @@ MasterClaw Core integrates with other components of the ecosystem:
 | **masterclaw-infrastructure** | Docker Compose | Deployment and orchestration |
 | **level100-studios** | Design system | UI components for interfaces |
 | **rex-deus** | Context API | Personal context and preferences |
+
+## Ecosystem Overview 🌐
+
+### masterclaw-tools CLI Commands
+
+The MasterClaw CLI (`mc`) provides comprehensive system administration:
+
+| Command | Description |
+|---------|-------------|
+| `mc status` | Dashboard-style service status monitoring |
+| `mc health` | Detailed health monitoring with history and trends |
+| `mc doctor` | System diagnostics and recommendations |
+| `mc logs` | View and stream logs from services |
+| `mc api-maintenance` | Remote maintenance operations |
+| `mc whoami` | User context and system information |
+| `mc workflow` | Workflow automation |
+| `mc terraform` | Infrastructure management |
+
+### level100-studios Design System Components
+
+The design system now includes 20+ production-ready components:
+
+**Layout & Navigation:**
+- `Divider` - Visual content separators
+- `Breadcrumbs` - Navigation path indicators
+- `Tabs` - Tabbed content interface
+- `Accordion` - Collapsible content sections
+
+**Data Display:**
+- `Table` - Tabular data display with sorting
+- `Stat` - Statistics and metrics display
+- `Timeline` - Chronological events
+- `Progress` - Progress bars
+- `Skeleton` - Loading placeholders
+
+**Input & Selection:**
+- `Button` - Action buttons
+- `Input` - Text input fields
+- `Select` - Dropdown selection
+- `Switch` - Toggle switches
+- `Radio` - Single-select options
+- `Checkbox` - Multi-select options
+
+**Feedback & Status:**
+- `Alert` - Important messages and notifications
+- `Toast` - Notification toasts
+- `Spinner` - Loading indicators
+- `Badge` - Status indicators and labels
+- `Chip` - Labels, tags, and filters
+- `EmptyState` - Empty list/page states
+
+**Utility:**
+- `Modal` - Dialog and overlay component
+- `Tooltip` - Hover information tooltips
+- `Avatar` - User/profile avatars
+- `Kbd` - Keyboard key representations
+- `Code` - Inline code and code blocks
+
+### API Features
+
+**Core API Endpoints:**
+- Chat with memory integration
+- Memory store (search, add, delete, update)
+- Session management
+- Bulk operations (memory, sessions)
+- Maintenance operations
+- Real-time log streaming (SSE)
+- Health monitoring and history
+- Security health checks
+- Prometheus metrics
+- Cache management
+
+**New Bulk Operations:**
+- `POST /v1/memory/bulk-delete` - Batch delete memories
+- `POST /v1/memory/bulk-update` - Batch update metadata
+- `POST /v1/sessions/batch-archive` - Archive sessions
+- `GET /v1/memory/stats/bulk` - Memory statistics
+- `GET /v1/sessions/stats/batch` - Session statistics
 
 ---
 
