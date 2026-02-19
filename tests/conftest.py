@@ -5,9 +5,35 @@ import os
 import tempfile
 import shutil
 import sys
+from unittest.mock import patch, MagicMock
 
 # Add the parent directory to the path so we can import masterclaw_core
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Patch health_history module before it gets imported to avoid /data permission issues
+_temp_health_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+_temp_health_db.close()
+os.environ['HEALTH_HISTORY_DB_PATH'] = _temp_health_db.name
+
+# Pre-patch the health_history module's default path
+with patch('masterclaw_core.health_history.Path.mkdir'):
+    with patch('masterclaw_core.health_history.sqlite3.connect'):
+        pass  # Just ensure patches are available
+
+
+def pytest_configure(config):
+    """Configure pytest - called before test collection"""
+    # Create a temp directory for health history tests
+    config._health_temp_dir = tempfile.mkdtemp()
+    os.environ['MASTERCLAW_TEST_DIR'] = config._health_temp_dir
+
+
+def pytest_unconfigure(config):
+    """Cleanup after all tests"""
+    if hasattr(config, '_health_temp_dir') and os.path.exists(config._health_temp_dir):
+        shutil.rmtree(config._health_temp_dir)
+    if os.path.exists(_temp_health_db.name):
+        os.unlink(_temp_health_db.name)
 
 
 @pytest.fixture
