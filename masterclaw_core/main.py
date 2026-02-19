@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import Response, JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
@@ -54,6 +54,8 @@ from .models import (
     WebhookResponse,
     WebhookConfigResponse,
     WebhookEventType,
+    LogStreamRequest,
+    LogEntry,
 )
 
 from .analytics import analytics
@@ -2814,3 +2816,329 @@ async def clear_cache(request: CacheClearRequest):
         keys_cleared=count,
         pattern=request.pattern
     )
+
+
+# =============================================================================
+# Log Streaming Endpoints
+# =============================================================================
+
+import os
+import glob
+from dataclasses import dataclass, field
+from typing import AsyncGenerator
+
+# In-memory log buffer for recent logs (circular buffer)
+@dataclass
+class LogBuffer:
+    """Circular buffer for recent log entries"""
+    max_size: int = 1000
+    _buffer: list = field(default_factory=list)
+    _index: int = 0
+
+    def add(self, entry: Dict[str, Any]):
+        """Add a log entry to the buffer"""
+        if len(self._buffer) < self.max_size:
+            self._buffer.append(entry)
+        else:
+            self._buffer[self._index] = entry
+            self._index = (self._index + 1) % self.max_size
+
+    def get_recent(self, count: int = 100) -> List[Dict[str, Any]]:
+        """Get recent log entries"""
+        if not self._buffer:
+            return []
+        sorted_buffer = sorted(self._buffer, key=lambda x: x.get('timestamp', ''), reverse=True)
+        return sorted_buffer[:count]
+
+    def get_since(self, since: datetime) -> List[Dict[str, Any]]:
+        """Get log entries since a specific time"""
+        return [e for e in self._buffer if e.get('timestamp', datetime.min) > since]
+
+
+# Global log buffer instance
+log_buffer = LogBuffer(max_size=5000)
+
+
+def get_log_level_priority(level: str) -> int:
+    """Get numeric priority for log level comparison"""
+    levels = {'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50}
+    return levels.get(level.upper(), 0)
+
+
+def parse_log_line(line: str, service: str = "unknown") -> Optional[Dict[str, Any]]:
+    """Parse a log line into structured format"""
+    try:
+        # Try JSON format first
+        if line.startswith('{'):
+            data = json.loads(line)
+            return {
+                'timestamp': data.get('timestamp', datetime.utcnow().isoformat()),
+                'service': service,
+                'level': data.get('level', 'INFO'),
+                'message': data.get('message', line),
+                'correlation_id': data.get('correlation_id'),
+                'metadata': {k: v for k, v in data.items() if k not in ['timestamp', 'level', 'message', 'correlation_id']}
+            }
+    except json.JSONDecodeError:
+        pass
+
+    # Try standard log format parsing
+    # Example: "2025-02-19 10:30:45,123 - masterclaw - INFO - Message"
+    import re
+    log_pattern = r'^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d+)?)\s+-\s+(\w+)\s+-\s+(\w+)\s+-\s+(.*)$'
+    match = re.match(log_pattern, line)
+
+    if match:
+        timestamp_str, logger_name, level, message = match.groups()
+        try:
+            timestamp = datetime.fromisoformat(timestamp_str.replace(',', '.'))
+        except ValueError:
+            timestamp = datetime.utcnow()
+        return {
+            'timestamp': timestamp.isoformat(),
+            'service': service,
+            'level': level.upper(),
+            'message': message.strip(),
+            'correlation_id': None,
+            'metadata': {'logger': logger_name}
+        }
+
+    # Fallback: treat entire line as message
+    return {
+        'timestamp': datetime.utcnow().isoformat(),
+        'service': service,
+        'level': 'INFO',
+        'message': line.strip(),
+        'correlation_id': None,
+        'metadata': {}
+    }
+
+
+def read_log_files(service: Optional[str] = None, since: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    """Read log files and return structured entries"""
+    entries = []
+
+    # Define log file locations
+    log_paths = {
+        'core': ['/var/log/masterclaw/core.log', '/app/logs/core.log', './logs/core.log'],
+        'backend': ['/var/log/masterclaw/backend.log', '/app/logs/backend.log'],
+        'gateway': ['/var/log/masterclaw/gateway.log', '/app/logs/gateway.log'],
+        'interface': ['/var/log/masterclaw/interface.log', '/var/log/nginx/access.log'],
+    }
+
+    services_to_check = [service] if service else log_paths.keys()
+
+    for svc in services_to_check:
+        paths = log_paths.get(svc, [f'/var/log/masterclaw/{svc}.log'])
+        for log_path in paths:
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        # Read last 1000 lines for efficiency
+                        lines = f.readlines()[-1000:]
+                        for line in lines:
+                            entry = parse_log_line(line.strip(), svc)
+                            if entry:
+                                entry_time = entry.get('timestamp')
+                                if isinstance(entry_time, str):
+                                    try:
+                                        entry_time = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                                    except ValueError:
+                                        entry_time = datetime.utcnow()
+                                if since is None or (isinstance(entry_time, datetime) and entry_time > since):
+                                    entries.append(entry)
+                except (IOError, OSError) as e:
+                    logger.debug(f"Could not read log file {log_path}: {e}")
+                break  # Stop after first successful read for this service
+
+    # Sort by timestamp
+    entries.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+    return entries[:1000]  # Limit to last 1000 entries
+
+
+async def log_event_generator(
+    service: Optional[str] = None,
+    level: Optional[str] = None,
+    search: Optional[str] = None,
+    follow: bool = True
+) -> AsyncGenerator[str, None]:
+    """Generate SSE events for log streaming"""
+    last_check = datetime.utcnow()
+    sent_ids = set()
+
+    # Send initial buffer contents
+    recent_logs = log_buffer.get_recent(100)
+    for entry in reversed(recent_logs):  # Oldest first
+        if _matches_filter(entry, service, level, search):
+            entry_id = f"{entry.get('timestamp')}:{entry.get('message', '')[:50]}"
+            if entry_id not in sent_ids:
+                sent_ids.add(entry_id)
+                yield f"data: {json.dumps(entry)}\n\n"
+
+    # Send historical logs from files
+    try:
+        historical = read_log_files(service, since=datetime.utcnow() - timedelta(minutes=5))
+        for entry in historical:
+            if _matches_filter(entry, service, level, search):
+                entry_id = f"{entry.get('timestamp')}:{entry.get('message', '')[:50]}"
+                if entry_id not in sent_ids:
+                    sent_ids.add(entry_id)
+                    yield f"data: {json.dumps(entry)}\n\n"
+    except Exception as e:
+        logger.debug(f"Error reading historical logs: {e}")
+
+    # Stream new logs if follow is enabled
+    if follow:
+        while True:
+            await asyncio.sleep(1)
+            new_logs = log_buffer.get_since(last_check)
+            last_check = datetime.utcnow()
+
+            for entry in new_logs:
+                if _matches_filter(entry, service, level, search):
+                    entry_id = f"{entry.get('timestamp')}:{entry.get('message', '')[:50]}"
+                    if entry_id not in sent_ids:
+                        sent_ids.add(entry_id)
+                        yield f"data: {json.dumps(entry)}\n\n"
+
+            # Prevent memory leak: limit sent_ids size
+            if len(sent_ids) > 10000:
+                sent_ids.clear()
+
+
+def _matches_filter(
+    entry: Dict[str, Any],
+    service: Optional[str],
+    level: Optional[str],
+    search: Optional[str]
+) -> bool:
+    """Check if a log entry matches the filter criteria"""
+    # Service filter
+    if service and entry.get('service') != service:
+        return False
+
+    # Level filter
+    if level:
+        entry_level = entry.get('level', 'INFO')
+        if get_log_level_priority(entry_level) < get_log_level_priority(level):
+            return False
+
+    # Search filter
+    if search:
+        search_lower = search.lower()
+        message = entry.get('message', '').lower()
+        if search_lower not in message:
+            return False
+
+    return True
+
+
+@app.post("/v1/logs/stream", tags=["logs"])
+async def stream_logs(request: LogStreamRequest):
+    """
+    Stream logs in real-time using Server-Sent Events (SSE).
+
+    This endpoint provides real-time log streaming with filtering capabilities.
+    It returns an SSE stream that can be consumed by web clients or CLI tools.
+
+    **Features:**
+    - Real-time streaming of new log entries
+    - Historical log retrieval (last 5 minutes)
+    - Service-based filtering
+    - Log level filtering
+    - Full-text search within messages
+
+    **Example Usage (curl):**
+    ```bash
+    curl -N -H "Accept: text/event-stream" \
+         -H "Content-Type: application/json" \
+         -X POST \
+         -d '{"service": "core", "level": "INFO", "follow": true}' \
+         http://localhost:8000/v1/logs/stream
+    ```
+
+    **Example Response (SSE format):**
+    ```
+    data: {"timestamp": "2025-02-19T10:30:45", "service": "core", "level": "INFO", "message": "Request processed"}
+
+    data: {"timestamp": "2025-02-19T10:30:46", "service": "core", "level": "ERROR", "message": "Connection failed"}
+    ```
+    """
+    return StreamingResponse(
+        log_event_generator(
+            service=request.service,
+            level=request.level,
+            search=request.search,
+            follow=request.follow
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
+
+@app.get("/v1/logs", tags=["logs"])
+async def get_logs(
+    service: Optional[str] = None,
+    level: Optional[str] = None,
+    search: Optional[str] = None,
+    since: str = "5m",
+    limit: int = 100
+):
+    """
+    Get recent logs as a JSON response (non-streaming).
+
+    This endpoint returns historical logs without streaming.
+    Useful for one-time log queries or when SSE is not supported.
+
+    **Query Parameters:**
+    - **service**: Filter by service name (core, backend, gateway, etc.)
+    - **level**: Minimum log level (DEBUG, INFO, WARNING, ERROR)
+    - **search**: Search pattern for log messages
+    - **since**: Time range (default: 5m, e.g., 1h, 24h)
+    - **limit**: Maximum number of entries (default: 100, max: 1000)
+    """
+    # Parse since parameter
+    since_delta = parse_duration(since)
+    since_time = datetime.utcnow() - since_delta
+
+    # Read logs
+    entries = read_log_files(service, since=since_time)
+
+    # Apply filters
+    filtered = [e for e in entries if _matches_filter(e, service, level, search)]
+
+    # Apply limit
+    limited = filtered[:min(limit, 1000)]
+
+    return {
+        "entries": limited,
+        "total": len(limited),
+        "filters": {
+            "service": service,
+            "level": level,
+            "search": search,
+            "since": since
+        }
+    }
+
+
+def parse_duration(duration: str) -> timedelta:
+    """Parse duration string like '5m', '1h', '24h' into timedelta"""
+    import re
+    match = re.match(r'^(\d+)([smhdw])$', duration.lower())
+    if not match:
+        return timedelta(minutes=5)  # Default
+
+    value, unit = int(match.group(1)), match.group(2)
+    multipliers = {
+        's': 1,
+        'm': 60,
+        'h': 3600,
+        'd': 86400,
+        'w': 604800
+    }
+    return timedelta(seconds=value * multipliers.get(unit, 60))

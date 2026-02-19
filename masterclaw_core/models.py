@@ -445,3 +445,22 @@ class WebhookConfigResponse(BaseModel):
     supported_events: List[str] = Field(default_factory=list, description="List of all supported event types")
     endpoint_url: str = Field(..., description="Full URL for webhook registration")
 
+
+class LogStreamRequest(BaseModel):
+    """Request model for log streaming"""
+    service: Optional[str] = Field(None, description="Service name to filter logs (core, backend, gateway, etc.)")
+    level: Optional[str] = Field(None, description="Minimum log level (DEBUG, INFO, WARNING, ERROR)")
+    search: Optional[str] = Field(None, description="Search pattern to filter logs", max_length=256)
+    since: Optional[str] = Field("5m", description="Time range for historical logs (e.g., 5m, 1h, 24h)")
+    follow: bool = Field(True, description="Whether to stream new logs in real-time")
+
+
+class LogEntry(BaseModel):
+    """Single log entry for streaming"""
+    timestamp: datetime = Field(..., description="Log entry timestamp")
+    service: str = Field(..., description="Service that generated the log")
+    level: str = Field(..., description="Log level")
+    message: str = Field(..., description="Log message")
+    correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional log metadata")
+
