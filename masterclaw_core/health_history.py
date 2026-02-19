@@ -7,6 +7,7 @@ and monitoring service reliability.
 
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,6 +16,12 @@ from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
 logger = logging.getLogger("masterclaw.health_history")
+
+# Default database path - uses environment variable or falls back to local data directory
+DEFAULT_HEALTH_DB_PATH = os.getenv(
+    "HEALTH_HISTORY_DB_PATH",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "health_history.db")
+)
 
 
 @dataclass
@@ -39,10 +46,22 @@ class HealthRecord:
 
 
 class HealthHistoryStore:
-    """Store and retrieve health check history"""
+    """Store and retrieve health check history
     
-    def __init__(self, db_path: str = "/data/health_history.db"):
-        self.db_path = Path(db_path)
+    The database path can be configured via the HEALTH_HISTORY_DB_PATH
+    environment variable. Defaults to ./data/health_history.db relative
+    to the workspace root.
+    """
+    
+    def __init__(self, db_path: Optional[str] = None):
+        """Initialize the health history store.
+        
+        Args:
+            db_path: Path to the SQLite database file. If None, uses
+                    the HEALTH_HISTORY_DB_PATH environment variable
+                    or falls back to a default local path.
+        """
+        self.db_path = Path(db_path or DEFAULT_HEALTH_DB_PATH)
         self._init_db()
     
     @contextmanager
@@ -56,40 +75,73 @@ class HealthHistoryStore:
             conn.close()
     
     def _init_db(self):
-        """Initialize the database schema"""
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        """Initialize the database schema
         
-        with self._get_connection() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS health_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    component TEXT NOT NULL,
-                    response_time_ms REAL,
-                    details TEXT,
-                    error TEXT
-                )
-            """)
-            
-            # Create indexes for efficient queries
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_timestamp 
-                ON health_records(timestamp)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_component 
-                ON health_records(component)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_status 
-                ON health_records(status)
-            """)
-            
-            conn.commit()
+        Creates the database directory if it doesn't exist and sets up
+        the required tables and indexes. Logs warnings on permission errors
+        but does not crash to allow the application to start even if
+        health history tracking is unavailable.
+        """
+        try:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            logger.warning(
+                f"Cannot create health history directory: {self.db_path.parent}. "
+                f"Health history tracking will be disabled. "
+                f"Set HEALTH_HISTORY_DB_PATH to a writable location."
+            )
+            self._db_available = False
+            return
+        except OSError as e:
+            logger.error(f"Failed to initialize health history database directory: {e}")
+            self._db_available = False
+            return
+        
+        self._db_available = True
+        
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS health_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        component TEXT NOT NULL,
+                        response_time_ms REAL,
+                        details TEXT,
+                        error TEXT
+                    )
+                """)
+                
+                # Create indexes for efficient queries
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_timestamp 
+                    ON health_records(timestamp)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_component 
+                    ON health_records(component)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_status 
+                    ON health_records(status)
+                """)
+                
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Failed to initialize health history database schema: {e}")
+            self._db_available = False
     
     def record(self, record: HealthRecord) -> None:
-        """Record a health check result"""
+        """Record a health check result
+        
+        If the database is not available (e.g., due to permission issues),
+        the record is silently dropped and an error is logged.
+        """
+        if not getattr(self, '_db_available', False):
+            logger.debug("Health history database not available, skipping record")
+            return
+            
         try:
             with self._get_connection() as conn:
                 conn.execute("""
@@ -117,34 +169,40 @@ class HealthHistoryStore:
         limit: int = 100,
         offset: int = 0,
     ) -> List[HealthRecord]:
-        """Retrieve health check history with filters"""
-        
+        """Retrieve health check history with filters
+
+        Returns empty list if the database is not available.
+        """
+        if not getattr(self, '_db_available', False):
+            logger.debug("Health history database not available, returning empty history")
+            return []
+
         query = "SELECT * FROM health_records WHERE 1=1"
         params = []
-        
+
         if component:
             query += " AND component = ?"
             params.append(component)
-        
+
         if since:
             query += " AND timestamp >= ?"
             params.append(since.isoformat())
-        
+
         if until:
             query += " AND timestamp <= ?"
             params.append(until.isoformat())
-        
+
         if status:
             query += " AND status = ?"
             params.append(status)
-        
+
         query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        
+
         try:
             with self._get_connection() as conn:
                 rows = conn.execute(query, params).fetchall()
-                
+
                 return [
                     HealthRecord(
                         timestamp=datetime.fromisoformat(row["timestamp"]),
@@ -165,8 +223,25 @@ class HealthHistoryStore:
         since: Optional[datetime] = None,
         component: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get a summary of health status over time"""
+        """Get a summary of health status over time
         
+        Returns empty dict with error metadata if database is not available.
+        """
+        if not getattr(self, '_db_available', False):
+            logger.debug("Health history database not available, returning empty summary")
+            return {
+                "period": {},
+                "components": {},
+                "overall": {
+                    "total_checks": 0,
+                    "healthy": 0,
+                    "degraded": 0,
+                    "unhealthy": 0,
+                    "availability_percent": 0.0,
+                },
+                "error": "Database not available",
+            }
+
         if since is None:
             since = datetime.utcnow() - timedelta(hours=24)
         
@@ -245,8 +320,20 @@ class HealthHistoryStore:
         component: str = "overall",
         since: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        """Calculate uptime statistics for a component"""
+        """Calculate uptime statistics for a component
         
+        Returns empty stats with error metadata if database is not available.
+        """
+        if not getattr(self, '_db_available', False):
+            logger.debug("Health history database not available, returning empty uptime stats")
+            return {
+                "component": component,
+                "period": {},
+                "uptime_percent": None,
+                "total_records": 0,
+                "error": "Database not available",
+            }
+
         if since is None:
             since = datetime.utcnow() - timedelta(days=7)
         
@@ -313,8 +400,14 @@ class HealthHistoryStore:
             return {}
     
     def cleanup_old_records(self, days: int = 30) -> int:
-        """Remove records older than specified days"""
+        """Remove records older than specified days
         
+        Returns 0 if database is not available.
+        """
+        if not getattr(self, '_db_available', False):
+            logger.debug("Health history database not available, skipping cleanup")
+            return 0
+
         cutoff = datetime.utcnow() - timedelta(days=days)
         
         try:
