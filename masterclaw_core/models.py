@@ -513,3 +513,83 @@ class MaintenanceStatusResponse(BaseModel):
     cache_stats: Dict[str, Any] = Field(default_factory=dict, description="Cache statistics")
     recommendations: List[str] = Field(default_factory=list, description="Maintenance recommendations")
 
+
+# =============================================================================
+# Bulk Memory Operations Models
+# =============================================================================
+
+class BulkMemoryOperationType(str, Enum):
+    """Types of bulk operations on memories"""
+    DELETE = "delete"
+    UPDATE_METADATA = "update_metadata"
+
+
+class BulkMemoryFilter(BaseModel):
+    """Filter criteria for bulk memory operations"""
+    memory_ids: Optional[List[str]] = Field(None, description="Specific memory IDs to target")
+    source: Optional[str] = Field(None, description="Filter by source")
+    since: Optional[datetime] = Field(None, description="Filter memories created after this date")
+    before: Optional[datetime] = Field(None, description="Filter memories created before this date")
+    metadata_query: Optional[Dict[str, Any]] = Field(None, description="Filter by metadata key-value pairs")
+    search_query: Optional[str] = Field(None, description="Search query to filter memories")
+
+
+class BulkMemoryDeleteRequest(BaseModel):
+    """Request model for bulk memory deletion"""
+    filter: BulkMemoryFilter = Field(..., description="Filter criteria for memories to delete")
+    dry_run: bool = Field(False, description="Preview what would be deleted without actually deleting")
+    limit: int = Field(1000, ge=1, le=5000, description="Maximum number of memories to delete")
+
+
+class BulkMemoryUpdateRequest(BaseModel):
+    """Request model for bulk memory metadata updates"""
+    filter: BulkMemoryFilter = Field(..., description="Filter criteria for memories to update")
+    metadata_updates: Dict[str, Any] = Field(..., description="Metadata fields to add/update")
+    metadata_removals: List[str] = Field(default_factory=list, description="Metadata keys to remove")
+    dry_run: bool = Field(False, description="Preview what would be updated without actually updating")
+    limit: int = Field(1000, ge=1, le=5000, description="Maximum number of memories to update")
+
+
+class BulkMemoryOperationResult(BaseModel):
+    """Result of a bulk memory operation"""
+    memory_id: str = Field(..., description="Memory ID")
+    success: bool = Field(..., description="Whether the operation succeeded")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
+    old_metadata: Optional[Dict[str, Any]] = Field(None, description="Previous metadata (for updates)")
+    new_metadata: Optional[Dict[str, Any]] = Field(None, description="New metadata (for updates)")
+
+
+class BulkMemoryDeleteResponse(BaseModel):
+    """Response model for bulk memory deletion"""
+    success: bool = Field(..., description="Whether the operation completed successfully")
+    dry_run: bool = Field(..., description="Whether this was a dry run")
+    total_matched: int = Field(0, description="Total memories matching filter")
+    deleted_count: int = Field(0, description="Number of memories actually deleted")
+    failed_count: int = Field(0, description="Number of memories that failed to delete")
+    results: List[BulkMemoryOperationResult] = Field(default_factory=list, description="Individual operation results")
+    duration_ms: float = Field(..., description="Operation duration in milliseconds")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BulkMemoryUpdateResponse(BaseModel):
+    """Response model for bulk memory metadata updates"""
+    success: bool = Field(..., description="Whether the operation completed successfully")
+    dry_run: bool = Field(..., description="Whether this was a dry run")
+    total_matched: int = Field(0, description="Total memories matching filter")
+    updated_count: int = Field(0, description="Number of memories actually updated")
+    failed_count: int = Field(0, description="Number of memories that failed to update")
+    results: List[BulkMemoryOperationResult] = Field(default_factory=list, description="Individual operation results")
+    duration_ms: float = Field(..., description="Operation duration in milliseconds")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BulkMemoryStatsResponse(BaseModel):
+    """Response model for bulk memory operation statistics"""
+    total_memories: int = Field(0, description="Total number of memories")
+    by_source: Dict[str, int] = Field(default_factory=dict, description="Count by source")
+    by_date: Dict[str, int] = Field(default_factory=dict, description="Count by creation date (YYYY-MM-DD)")
+    oldest_memory: Optional[datetime] = Field(None, description="Date of oldest memory")
+    newest_memory: Optional[datetime] = Field(None, description="Date of newest memory")
+    total_size_estimate: int = Field(0, description="Estimated total size in bytes")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
