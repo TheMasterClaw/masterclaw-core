@@ -4,6 +4,83 @@ All notable changes to MasterClaw Core will be documented in this file.
 
 ## [Unreleased]
 
+### Added: Troubleshooting Guide and Diagnostic Assistant (`mc troubleshoot`) 🔧
+- **New Feature**: Interactive troubleshooting wizard for common MasterClaw issues
+  - **Purpose**: Help users diagnose and fix problems without searching documentation
+  - **Benefit**: Faster issue resolution with guided solutions
+
+- **New Commands**:
+  - `mc troubleshoot wizard` — Interactive troubleshooting wizard
+    - Step-by-step diagnosis with category selection
+    - Symptom matching to identify issues
+    - Guided solution execution
+  - `mc troubleshoot list` — List all common issues
+    - Filter by category: `--category docker`
+    - Filter by severity: `--severity critical`
+  - `mc troubleshoot guide <issue>` — Detailed troubleshooting guide
+    - Symptoms, diagnosis steps, and solutions
+    - Prevention tips for each issue
+  - `mc troubleshoot diagnose` — Quick diagnostic checks
+    - Fast system health overview
+    - Identifies common problems
+
+- **Covered Issues** (8 common problems):
+  | Issue | Severity | Category |
+  |-------|----------|----------|
+  | Services Not Starting | 🔴 Critical | docker |
+  | SSL Certificate Problems | 🔴 High | ssl |
+  | High Memory Usage | 🔴 High | performance |
+  | Database Connection Problems | 🔴 Critical | database |
+  | LLM API Connection Errors | 🔴 High | api |
+  | Backup Not Working | 🟡 Medium | backup |
+  | Slow Response Times | 🟡 Medium | performance |
+  | Notifications Not Working | 🟢 Low | notifications |
+
+- **Features**:
+  - Interactive wizard with inquirer prompts
+  - One-click solution execution
+  - Prevention recommendations
+  - Quick diagnostic mode
+  - Severity-based prioritization
+
+- **Files Added**:
+  - `lib/troubleshoot.js` - Troubleshooting module (~600 lines)
+  - Updated `bin/mc.js` - Registered `mc troubleshoot` command
+  - Updated `README.md` - Added comprehensive documentation
+
+### Added: Configuration Template Generator (`mc template`) 📄
+- **New Feature**: Generate starter configuration files for MasterClaw deployments
+  - **Purpose**: Simplify onboarding and ensure consistent configuration
+  - **Benefit**: New users can generate valid configs without reading docs
+
+- **New Commands**:
+  - `mc template list` — List all available templates
+  - `mc template generate <template>` — Generate a configuration file
+    - Supports `--interactive` mode with prompts
+    - Custom output path with `-o, --output`
+    - Force overwrite with `--force`
+  - `mc template show <template>` — Preview template output
+  - `mc template wizard` — Interactive wizard for generating configs
+
+- **Available Templates**:
+  - `env` — Complete .env file with all settings
+  - `docker-override` — Docker Compose override for local development
+  - `terraform-vars` — Terraform variables for AWS deployment
+  - `service` — Template for adding custom services
+  - `monitoring` — Prometheus/Grafana alert rules
+  - `backup` — Cloud backup configuration
+
+- **Features**:
+  - Interactive prompts for required values
+  - Smart defaults based on environment type
+  - Auto-generated secure tokens
+  - Validation-ready output
+
+- **Files Added**:
+  - `lib/template.js` - Template generator module (~600 lines)
+  - Updated `bin/mc.js` - Registered `mc template` command
+  - Updated `README.md` - Added comprehensive documentation
+
 ### Added: Terraform Infrastructure Management (`mc terraform`) 🏗️
 - **New Feature**: Complete Terraform Infrastructure as Code (IaC) management via CLI
   - **Purpose**: Bridge the gap between Terraform infrastructure code and CLI usability

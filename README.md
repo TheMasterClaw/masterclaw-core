@@ -119,6 +119,69 @@ DELETE /v1/sessions/{session_id}
 GET /v1/sessions/stats/summary
 ```
 
+### Maintenance API 🆕
+
+System maintenance operations for administration:
+
+```bash
+# Get maintenance status
+GET /v1/maintenance/status?retention_days=30
+
+# Run maintenance tasks
+POST /v1/maintenance/run
+{
+  "task": "health_history_cleanup",
+  "days": 30,
+  "dry_run": false
+}
+```
+
+**Available Tasks:**
+- `health_history_cleanup` - Remove old health history records
+- `cache_clear` - Clear the response cache
+- `session_cleanup` - Remove old sessions
+- `memory_optimize` - Optimize memory store
+- `all` - Run all maintenance tasks
+
+**Features:**
+- Dry-run mode for safe previews
+- Configurable retention period
+- Detailed results for each task
+- Maintenance recommendations
+
+### Cache API 🆕
+
+Response caching management:
+
+```bash
+# Get cache statistics
+GET /cache/stats
+
+# Get cache health
+GET /cache/health
+
+# Clear all cached responses
+POST /cache/clear
+```
+
+### Logs API 🆕
+
+Real-time log streaming and retrieval:
+
+```bash
+# Stream logs (SSE)
+POST /v1/logs/stream
+{
+  "service": "core",
+  "level": "INFO",
+  "search": "error",
+  "follow": true
+}
+
+# Get recent logs
+GET /v1/logs?service=core&level=ERROR&since=1h&limit=100
+```
+
 ### Context API (rex-deus Integration) 🆕
 
 Access Rex's personal context files programmatically:
@@ -152,17 +215,39 @@ GET /v1/context/summary
 - Knowledge base lookups
 - People and relationship context
 
+## CLI Integration 🆕
+
+The MasterClaw CLI (`mc`) provides convenient access to maintenance operations:
+
+```bash
+# Check maintenance status
+mc api-maintenance status
+
+# Run maintenance with dry-run preview
+mc api-maintenance run --task health_history_cleanup --dry-run
+
+# Actually run maintenance
+mc api-maintenance run --task all --days 30
+
+# List available tasks
+mc api-maintenance tasks
+```
+
 ## Architecture
 
 ```
 masterclaw_core/
-├── __init__.py        # Package info
-├── __main__.py        # Entry point
-├── main.py            # FastAPI app
-├── config.py          # Settings with validation
-├── models.py          # Pydantic models
-├── llm.py             # LLM router (OpenAI, Anthropic)
-└── memory.py          # Memory store (Chroma, JSON)
+├── __init__.py           # Package info
+├── __main__.py           # Entry point
+├── main.py               # FastAPI app
+├── config.py             # Settings with validation
+├── models.py             # Pydantic models
+├── llm.py                # LLM router (OpenAI, Anthropic)
+├── memory.py             # Memory store (Chroma, JSON)
+├── cache.py              # Response caching (Redis/Memory)
+├── health_history.py     # Health tracking and analytics
+├── audit_logger.py       # Security audit logging
+└── context_manager.py    # Rex-deus context integration
 ```
 
 ## Configuration
@@ -181,6 +266,12 @@ Configuration is validated on startup with security checks:
 | `CORS_ORIGINS` | ["*"] | Allowed CORS origins | Valid URLs; warns if "*" in production |
 | `SESSION_TIMEOUT` | 3600 | Session timeout (seconds) | 60-604800 (7 days) |
 | `LOG_LEVEL` | info | Logging level | debug, info, warning, error, critical |
+| `CACHE_ENABLED` | true | Enable response caching | true/false |
+| `CACHE_BACKEND` | memory | Cache backend | memory, redis |
+| `CACHE_DEFAULT_TTL` | 300 | Default cache TTL (seconds) | 0-86400 |
+| `CACHE_MAX_SIZE` | 1000 | Max entries in memory cache | 100-100000 |
+| `CACHE_REDIS_URL` | - | Redis connection URL | Valid redis:// URL |
+| `ENVIRONMENT` | development | Environment name | development, production |
 
 ### Security Validation
 
@@ -220,13 +311,43 @@ pytest --cov=masterclaw_core
 
 # Run specific test file
 pytest tests/test_config.py -v
+
+# Run API integration tests
+pytest tests/test_api.py -v
 ```
 
-## Related
+## Development Workflow
 
-- [masterclaw-infrastructure](https://github.com/TheMasterClaw/masterclaw-infrastructure) — Deployment
-- [masterclaw-tools](https://github.com/TheMasterClaw/masterclaw-tools) — CLI
-- [MasterClawInterface](https://github.com/TheMasterClaw/MasterClawInterface) — The UI
+### Quick Start for Development
+
+```bash
+# 1. Clone and setup
+git clone https://github.com/TheMasterClaw/masterclaw-core.git
+cd masterclaw-core
+pip install -r requirements.txt
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your API keys
+
+# 3. Run the API
+python -m masterclaw_core
+
+# 4. In another terminal, use the CLI
+mc api-maintenance status
+mc status
+```
+
+## Ecosystem Integration
+
+MasterClaw Core integrates with other components of the ecosystem:
+
+| Component | Integration | Purpose |
+|-----------|-------------|---------|
+| **masterclaw-tools** | CLI commands | Remote administration via `mc` |
+| **masterclaw-infrastructure** | Docker Compose | Deployment and orchestration |
+| **level100-studios** | Design system | UI components for interfaces |
+| **rex-deus** | Context API | Personal context and preferences |
 
 ---
 

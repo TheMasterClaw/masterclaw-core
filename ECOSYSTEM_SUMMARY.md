@@ -121,6 +121,8 @@
 - `lib/benchmark.js` - **NEW: Performance benchmarking and regression detection**
 - `lib/secrets.js` - **NEW: Secure secrets management for API keys and tokens**
 - `lib/terraform.js` - **NEW: Terraform infrastructure management for AWS deployments**
+- `lib/template.js` - **NEW: Configuration template generator for quick setup**
+- `lib/troubleshoot.js` - **NEW: Troubleshooting guide and diagnostic assistant**
 
 **Commands:**
 ```bash
@@ -217,6 +219,11 @@ mc terraform plan   # Plan Terraform changes
 mc terraform apply  # Apply Terraform changes
 mc terraform output # Show Terraform outputs
 mc terraform kubeconfig  # Configure kubectl for cluster
+mc template list         # List configuration templates
+mc template generate env # Generate .env file
+mc template wizard       # Interactive config wizard
+mc troubleshoot wizard   # Interactive troubleshooting guide
+mc troubleshoot diagnose # Quick diagnostics
 ```
 
 ---
