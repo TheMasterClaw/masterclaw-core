@@ -74,6 +74,17 @@ from .models import (
     BatchSessionDeleteResponse,
     BatchSessionArchiveResponse,
     BatchSessionStatsResponse,
+    SummaryType,
+    ConversationMessageInput,
+    ConversationSummaryRequest,
+    ConversationSummaryResponse,
+    ConversationTitleRequest,
+    ConversationTitleResponse,
+    ArchiveConversationRequest,
+    ArchiveConversationResponse,
+    ArchiveListResponse,
+    SessionSummarizeRequest,
+    AutoSummarizeConfig,
 )
 
 from .analytics import analytics
@@ -81,6 +92,7 @@ from .llm import router as llm_router
 from .memory import get_memory_store, MemoryStore
 from .websocket import manager
 from .tools import registry as tool_registry
+from .summarizer import summarizer, ConversationMessage, SummaryType
 from .middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
@@ -4305,3 +4317,465 @@ async def get_telemetry_metrics():
         cache_misses=cache_misses,
         cache_hit_rate=cache_hit_rate
     )
+
+
+# =============================================================================
+# Conversation Summarization Endpoints
+# =============================================================================
+
+@app.post("/v1/summarize", response_model=ConversationSummaryResponse, tags=["summarization"])
+async def summarize_conversation(request: ConversationSummaryRequest):
+    """
+    Generate a summary of a conversation.
+    
+    Supports multiple summary types:
+    - **brief**: 1-2 sentence summary
+    - **detailed**: Full paragraph with context
+    - **bullets**: Bullet point format
+    - **topics**: Key topics only
+    - **actions**: Action items only
+    
+    ## Example Request
+    ```json
+    {
+      "messages": [
+        {"role": "user", "content": "How do I deploy to AWS?"},
+        {"role": "assistant", "content": "You can use the mc terraform commands..."},
+        {"role": "user", "content": "What about monitoring?"}
+      ],
+      "summary_type": "brief",
+      "extract_insights": true,
+      "generate_title": true
+    }
+    ```
+    
+    ## Example Response
+    ```json
+    {
+      "session_id": "sum_abc123",
+      "summary": "User asked about AWS deployment and monitoring setup. Assistant provided terraform commands and monitoring recommendations.",
+      "summary_type": "brief",
+      "key_topics": ["AWS deployment", "Terraform", "Monitoring"],
+      "action_items": ["Set up terraform configuration", "Configure monitoring alerts"],
+      "decisions": [],
+      "sentiment": "neutral",
+      "title": "AWS Deployment Discussion",
+      "message_count": 3,
+      "word_count": 45,
+      "estimated_reading_time_minutes": 0.2,
+      "generated_at": "2026-02-23T11:30:00Z"
+    }
+    ```
+    """
+    session_id = request.session_id or f"sum_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    
+    # Convert input messages to ConversationMessage objects
+    messages = [
+        ConversationMessage(
+            role=msg.role,
+            content=msg.content,
+            timestamp=msg.timestamp,
+        )
+        for msg in request.messages
+    ]
+    
+    try:
+        # Generate summary
+        summary = await summarizer.summarize(
+            session_id=session_id,
+            messages=messages,
+            summary_type=SummaryType(request.summary_type.value),
+            extract_insights=request.extract_insights,
+        )
+        
+        # Generate title if requested
+        if request.generate_title and not summary.title:
+            summary.title = await summarizer.generate_title(messages)
+        
+        # Calculate compression ratio
+        summary_word_count = len(summary.summary.split())
+        original_word_count = summary.word_count
+        compression_ratio = (
+            (original_word_count - summary_word_count) / original_word_count
+            if original_word_count > 0 else 0.0
+        )
+        
+        return ConversationSummaryResponse(
+            session_id=summary.session_id,
+            summary=summary.summary,
+            summary_type=SummaryType(summary.summary_type.value),
+            key_topics=summary.key_topics,
+            action_items=summary.action_items,
+            decisions=summary.decisions,
+            sentiment=summary.sentiment,
+            title=summary.title,
+            message_count=summary.message_count,
+            word_count=summary.word_count,
+            estimated_reading_time_minutes=summary.estimated_reading_time_minutes,
+            compression_ratio=compression_ratio,
+            generated_at=summary.generated_at,
+        )
+    
+    except Exception as e:
+        logger.error(f"Summarization failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate summary: {str(e)}"
+        )
+
+
+@app.post("/v1/summarize/title", response_model=ConversationTitleResponse, tags=["summarization"])
+async def generate_conversation_title(request: ConversationTitleRequest):
+    """
+    Generate a descriptive title for a conversation.
+    
+    Analyzes the conversation content and produces a short,
+    meaningful title (5 words or less).
+    
+    ## Example Request
+    ```json
+    {
+      "messages": [
+        {"role": "user", "content": "How do I configure backups?"},
+        {"role": "assistant", "content": "You can use mc backup commands..."}
+      ]
+    }
+    ```
+    
+    ## Example Response
+    ```json
+    {
+      "title": "Backup Configuration Help",
+      "message_count": 2
+    }
+    ```
+    """
+    messages = [
+        ConversationMessage(
+            role=msg.role,
+            content=msg.content,
+            timestamp=msg.timestamp,
+        )
+        for msg in request.messages
+    ]
+    
+    try:
+        title = await summarizer.generate_title(messages)
+        return ConversationTitleResponse(
+            title=title,
+            message_count=len(messages),
+        )
+    except Exception as e:
+        logger.error(f"Title generation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate title: {str(e)}"
+        )
+
+
+@app.post("/v1/summarize/session/{session_id}", response_model=ConversationSummaryResponse, tags=["summarization"])
+async def summarize_existing_session(
+    session_id: str,
+    request: SessionSummarizeRequest,
+):
+    """
+    Summarize an existing chat session.
+    
+    Retrieves the session history and generates a summary.
+    Optionally archives the session after summarizing.
+    
+    ## Example Request
+    ```json
+    {
+      "summary_type": "detailed",
+      "extract_insights": true,
+      "archive_after": false
+    }
+    ```
+    """
+    # Validate session ID
+    from .security_response import security_response
+    validated_session_id = security_response.sanitize_input(session_id, 'session_id')
+    
+    # Retrieve session from memory store
+    try:
+        memory_store = await get_memory_store()
+        # Note: This assumes sessions are stored in a way we can retrieve
+        # You may need to adapt this based on actual session storage
+        session_data = await memory_store.get_session(validated_session_id)
+        
+        if not session_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session {validated_session_id} not found"
+            )
+        
+        # Convert session messages
+        messages = [
+            ConversationMessage(
+                role=msg.get("role", "user"),
+                content=msg.get("content", ""),
+                timestamp=msg.get("timestamp"),
+            )
+            for msg in session_data.get("messages", [])
+        ]
+        
+        if not messages:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Session has no messages to summarize"
+            )
+        
+        # Generate summary
+        summary = await summarizer.summarize(
+            session_id=validated_session_id,
+            messages=messages,
+            summary_type=SummaryType(request.summary_type.value),
+            extract_insights=request.extract_insights,
+        )
+        
+        # Archive if requested
+        if request.archive_after:
+            await summarizer.archive_conversation(
+                session_id=validated_session_id,
+                messages=messages,
+                summary_type=SummaryType(request.summary_type.value),
+                archive_reason="user_requested",
+            )
+        
+        # Calculate compression ratio
+        summary_word_count = len(summary.summary.split())
+        original_word_count = summary.word_count
+        compression_ratio = (
+            (original_word_count - summary_word_count) / original_word_count
+            if original_word_count > 0 else 0.0
+        )
+        
+        return ConversationSummaryResponse(
+            session_id=summary.session_id,
+            summary=summary.summary,
+            summary_type=SummaryType(summary.summary_type.value),
+            key_topics=summary.key_topics,
+            action_items=summary.action_items,
+            decisions=summary.decisions,
+            sentiment=summary.sentiment,
+            title=summary.title,
+            message_count=summary.message_count,
+            word_count=summary.word_count,
+            estimated_reading_time_minutes=summary.estimated_reading_time_minutes,
+            compression_ratio=compression_ratio,
+            generated_at=summary.generated_at,
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session summarization failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to summarize session: {str(e)}"
+        )
+
+
+@app.post("/v1/summarize/archive", response_model=ArchiveConversationResponse, tags=["summarization"])
+async def archive_conversation(request: ArchiveConversationRequest):
+    """
+    Archive a conversation with a generated summary.
+    
+    Creates a compressed archive of the conversation with metadata,
+    reducing storage while preserving key information.
+    
+    ## Example Request
+    ```json
+    {
+      "session_id": "sess_abc123",
+      "messages": [...],
+      "summary_type": "detailed",
+      "archive_reason": "session_completed",
+      "preserve_original": true
+    }
+    ```
+    
+    ## Example Response
+    ```json
+    {
+      "success": true,
+      "session_id": "sess_abc123",
+      "summary": {...},
+      "archived_at": "2026-02-23T11:30:00Z",
+      "compression_ratio": 0.75,
+      "archive_reason": "session_completed",
+      "message_count": 50
+    }
+    ```
+    """
+    messages = [
+        ConversationMessage(
+            role=msg.role,
+            content=msg.content,
+            timestamp=msg.timestamp,
+        )
+        for msg in request.messages
+    ]
+    
+    try:
+        archive = await summarizer.archive_conversation(
+            session_id=request.session_id,
+            messages=messages,
+            summary_type=SummaryType(request.summary_type.value),
+            archive_reason=request.archive_reason,
+        )
+        
+        # Convert summary to response model
+        summary_response = ConversationSummaryResponse(
+            session_id=archive.summary.session_id,
+            summary=archive.summary.summary,
+            summary_type=SummaryType(archive.summary.summary_type.value),
+            key_topics=archive.summary.key_topics,
+            action_items=archive.summary.action_items,
+            decisions=archive.summary.decisions,
+            sentiment=archive.summary.sentiment,
+            title=archive.summary.title,
+            message_count=archive.summary.message_count,
+            word_count=archive.summary.word_count,
+            estimated_reading_time_minutes=archive.summary.estimated_reading_time_minutes,
+            compression_ratio=archive.compression_ratio,
+            generated_at=archive.summary.generated_at,
+        )
+        
+        return ArchiveConversationResponse(
+            success=True,
+            session_id=archive.session_id,
+            summary=summary_response,
+            archived_at=archive.archived_at,
+            compression_ratio=archive.compression_ratio,
+            archive_reason=archive.archive_reason,
+            message_count=len(archive.original_messages),
+        )
+    
+    except Exception as e:
+        logger.error(f"Archiving failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to archive conversation: {str(e)}"
+        )
+
+
+@app.get("/v1/summarize/archives", response_model=ArchiveListResponse, tags=["summarization"])
+async def list_archived_conversations(
+    limit: int = 100,
+    offset: int = 0,
+):
+    """
+    List archived conversations with their summaries.
+    
+    Returns paginated list of archived conversations sorted by
+    archive date (newest first).
+    """
+    try:
+        archives = summarizer.list_archives(limit=limit, offset=offset)
+        
+        archive_responses = []
+        for archive in archives:
+            summary_response = ConversationSummaryResponse(
+                session_id=archive.summary.session_id,
+                summary=archive.summary.summary,
+                summary_type=SummaryType(archive.summary.summary_type.value),
+                key_topics=archive.summary.key_topics,
+                action_items=archive.summary.action_items,
+                decisions=archive.summary.decisions,
+                sentiment=archive.summary.sentiment,
+                title=archive.summary.title,
+                message_count=archive.summary.message_count,
+                word_count=archive.summary.word_count,
+                estimated_reading_time_minutes=archive.summary.estimated_reading_time_minutes,
+                compression_ratio=archive.compression_ratio,
+                generated_at=archive.summary.generated_at,
+            )
+            archive_responses.append(summary_response)
+        
+        return ArchiveListResponse(
+            total_archives=len(summarizer._archive),
+            archives=archive_responses,
+            limit=limit,
+            offset=offset,
+        )
+    
+    except Exception as e:
+        logger.error(f"Failed to list archives: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list archives: {str(e)}"
+        )
+
+
+@app.delete("/v1/summarize/archives/{session_id}", tags=["summarization"])
+async def delete_archived_conversation(session_id: str):
+    """
+    Delete an archived conversation.
+    
+    Permanently removes the archived conversation and its summary.
+    """
+    try:
+        deleted_count = summarizer.clear_archive(session_id)
+        
+        if deleted_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Archive for session {session_id} not found"
+            )
+        
+        return {"success": True, "message": f"Archive for session {session_id} deleted"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete archive: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete archive: {str(e)}"
+        )
+
+
+@app.get("/v1/summarize/types", tags=["summarization"])
+async def get_summary_types():
+    """
+    Get available summary types and their descriptions.
+    
+    Returns information about the different types of summaries
+    that can be generated.
+    """
+    return {
+        "types": [
+            {
+                "id": "brief",
+                "name": "Brief",
+                "description": "1-2 sentence summary capturing the main points",
+                "best_for": "Quick overviews, notifications, previews",
+            },
+            {
+                "id": "detailed",
+                "name": "Detailed",
+                "description": "Full paragraph with context and outcomes",
+                "best_for": "Documentation, handoffs, long-term storage",
+            },
+            {
+                "id": "bullets",
+                "name": "Bullet Points",
+                "description": "Key information in bullet point format",
+                "best_for": "Meeting notes, action items, quick reference",
+            },
+            {
+                "id": "topics",
+                "name": "Topics",
+                "description": "Key topics discussed only",
+                "best_for": "Tagging, categorization, search indexing",
+            },
+            {
+                "id": "actions",
+                "name": "Actions",
+                "description": "Action items and follow-ups only",
+                "best_for": "Task management, todo lists, follow-up tracking",
+            },
+        ]
+    }

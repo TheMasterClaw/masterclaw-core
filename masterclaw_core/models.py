@@ -697,3 +697,104 @@ class BatchSessionStatsResponse(BaseModel):
     total_messages: int = Field(0, description="Total number of messages across all sessions")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
+
+# =============================================================================
+# Conversation Summarization Models
+# =============================================================================
+
+class SummaryType(str, Enum):
+    """Types of conversation summaries"""
+    BRIEF = "brief"
+    DETAILED = "detailed"
+    BULLETS = "bullets"
+    TOPICS = "topics"
+    ACTIONS = "actions"
+
+
+class ConversationMessageInput(BaseModel):
+    """Input model for a conversation message"""
+    role: Literal["user", "assistant", "system"] = Field(..., description="Message role")
+    content: str = Field(..., description="Message content", min_length=1)
+    timestamp: Optional[datetime] = Field(None, description="Message timestamp")
+
+
+class ConversationSummaryRequest(BaseModel):
+    """Request model for conversation summarization"""
+    session_id: Optional[str] = Field(None, description="Session ID (if not provided, one will be generated)")
+    messages: List[ConversationMessageInput] = Field(..., description="Conversation messages to summarize", min_length=1)
+    summary_type: SummaryType = Field(SummaryType.BRIEF, description="Type of summary to generate")
+    extract_insights: bool = Field(True, description="Whether to extract topics, actions, and decisions")
+    generate_title: bool = Field(False, description="Whether to generate a title for the conversation")
+
+
+class ConversationSummaryResponse(BaseModel):
+    """Response model for conversation summarization"""
+    session_id: str = Field(..., description="Session identifier")
+    summary: str = Field(..., description="Generated summary text")
+    summary_type: SummaryType = Field(..., description="Type of summary generated")
+    key_topics: List[str] = Field(default_factory=list, description="Key topics discussed")
+    action_items: List[str] = Field(default_factory=list, description="Extracted action items")
+    decisions: List[str] = Field(default_factory=list, description="Decisions or conclusions reached")
+    sentiment: Optional[str] = Field(None, description="Overall sentiment of conversation")
+    title: Optional[str] = Field(None, description="Generated title (if requested)")
+    message_count: int = Field(..., description="Number of messages summarized")
+    word_count: int = Field(..., description="Total word count of original conversation")
+    estimated_reading_time_minutes: float = Field(..., description="Estimated reading time of original")
+    compression_ratio: Optional[float] = Field(None, description="How much the conversation was compressed")
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConversationTitleRequest(BaseModel):
+    """Request model for conversation title generation"""
+    messages: List[ConversationMessageInput] = Field(..., description="Conversation messages", min_length=1)
+
+
+class ConversationTitleResponse(BaseModel):
+    """Response model for conversation title generation"""
+    title: Optional[str] = Field(None, description="Generated title")
+    message_count: int = Field(..., description="Number of messages analyzed")
+
+
+class ArchiveConversationRequest(BaseModel):
+    """Request model for archiving a conversation"""
+    session_id: str = Field(..., description="Session identifier")
+    messages: List[ConversationMessageInput] = Field(..., description="Conversation messages to archive", min_length=1)
+    summary_type: SummaryType = Field(SummaryType.DETAILED, description="Type of summary to generate")
+    archive_reason: Optional[str] = Field(None, description="Reason for archiving")
+    preserve_original: bool = Field(True, description="Whether to preserve original messages in archive")
+
+
+class ArchiveConversationResponse(BaseModel):
+    """Response model for conversation archiving"""
+    success: bool = Field(..., description="Whether archiving succeeded")
+    session_id: str = Field(..., description="Session identifier")
+    summary: ConversationSummaryResponse = Field(..., description="Generated summary")
+    archived_at: datetime = Field(default_factory=datetime.utcnow)
+    compression_ratio: float = Field(..., description="Compression ratio achieved")
+    archive_reason: Optional[str] = Field(None, description="Reason for archiving")
+    message_count: int = Field(..., description="Number of messages archived")
+
+
+class ArchiveListResponse(BaseModel):
+    """Response model for listing archived conversations"""
+    total_archives: int = Field(..., description="Total number of archived conversations")
+    archives: List[ConversationSummaryResponse] = Field(default_factory=list, description="List of archive summaries")
+    limit: int = Field(100, description="Number of results returned")
+    offset: int = Field(0, description="Offset for pagination")
+
+
+class SessionSummarizeRequest(BaseModel):
+    """Request model for summarizing an existing session"""
+    summary_type: SummaryType = Field(SummaryType.BRIEF, description="Type of summary to generate")
+    extract_insights: bool = Field(True, description="Whether to extract insights")
+    archive_after: bool = Field(False, description="Whether to archive the session after summarizing")
+
+
+class AutoSummarizeConfig(BaseModel):
+    """Configuration for automatic summarization"""
+    enabled: bool = Field(False, description="Whether auto-summarization is enabled")
+    message_threshold: int = Field(50, ge=10, le=500, description="Number of messages before auto-summarizing")
+    summary_type: SummaryType = Field(SummaryType.BRIEF, description="Default summary type")
+    auto_archive: bool = Field(False, description="Whether to auto-archive after summarizing")
+    preserve_insights: bool = Field(True, description="Whether to extract and preserve insights")
+
