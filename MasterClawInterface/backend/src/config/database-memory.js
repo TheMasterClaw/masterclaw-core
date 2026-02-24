@@ -23,7 +23,9 @@ class InMemoryDB {
 
   async query(text, params = []) {
     // Simple SQL parsing for basic operations
-    const lowerText = text.toLowerCase();
+    const lowerText = text.toLowerCase().trim();
+    
+    // Debug: console.log('DB QUERY:', text.substring(0, 60).replace(/\n/g, ' '));
     
     // SELECT
     if (lowerText.startsWith('select')) {
@@ -49,8 +51,15 @@ class InMemoryDB {
   }
 
   handleSelect(text, params) {
+    // Handle JOINs by extracting just the main table
+    let processedText = text;
+    
+    // Remove JOIN clauses for in-memory queries (simplified approach)
+    processedText = processedText.replace(/\s+LEFT\s+JOIN\s+\w+\s+\w+\s+ON\s+[^\s]+\s*=\s*[^\s]+/gi, '');
+    processedText = processedText.replace(/\s+JOIN\s+\w+\s+\w+\s+ON\s+[^\s]+\s*=\s*[^\s]+/gi, '');
+    
     // Extract table name (simple regex)
-    const fromMatch = text.match(/from\s+(\w+)/i);
+    const fromMatch = processedText.match(/from\s+(\w+)/i);
     if (!fromMatch) return { rows: [] };
     
     const tableName = fromMatch[1];
