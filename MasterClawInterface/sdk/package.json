@@ -1,0 +1,26 @@
+{
+  "name": "@masterclaw/agent-client",
+  "version": "1.0.0",
+  "description": "MasterClaw Agent Client SDK - Connect your agents to the MasterClaw Chat Interface",
+  "main": "agent-client.js",
+  "types": "agent-client.d.ts",
+  "scripts": {
+    "test": "node test-client.js"
+  },
+  "keywords": [
+    "masterclaw",
+    "agent",
+    "chat",
+    "websocket",
+    "ai"
+  ],
+  "author": "MasterClaw",
+  "license": "MIT",
+  "dependencies": {
+    "socket.io-client": "^4.7.2",
+    "axios": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

@@ -1,0 +1,927 @@
+openapi: 3.0.3
+info:
+  title: MasterClaw Chat Interface API
+  description: |
+    Real-time WebSocket and REST API for Rex to communicate with AI agents.
+    
+    ## Features
+    - **WebSocket Messaging**: Real-time bidirectional communication
+    - **Agent Registry**: Manage agent registration and status
+    - **Message Routing**: Direct and broadcast messaging
+    - **Memory Logging**: Log agent thoughts, needs, observations
+    - **Job Management**: Create and track agent tasks
+    
+    ## Authentication
+    API uses JWT Bearer tokens for authentication. Include token in header:
+    ```
+    Authorization: Bearer <token>
+    ```
+  version: 1.0.0
+  contact:
+    name: MasterClaw Team
+    url: https://github.com/TheMasterClaw/masterclaw-core
+
+servers:
+  - url: http://localhost:3001
+    description: Local development server
+  - url: https://api.masterclaw.io
+    description: Production server
+
+tags:
+  - name: Agents
+    description: Agent registry and management
+  - name: Messages
+    description: Message history and REST messaging
+  - name: Server
+    description: Health checks and server stats
+
+paths:
+  /health:
+    get:
+      tags:
+        - Server
+      summary: Health check
+      description: Check if the server is running and database is connected
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  timestamp:
+                    type: string
+                    format: date-time
+                  uptime:
+                    type: number
+                    description: Server uptime in seconds
+                  version:
+                    type: string
+                    example: 1.0.0
+
+  /api/stats:
+    get:
+      tags:
+        - Server
+      summary: Server statistics
+      description: Get server statistics including connected agents, messages, etc.
+      responses:
+        '200':
+          description: Server statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      online:
+                        type: integer
+                      offline:
+                        type: integer
+                  messages:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      today:
+                        type: integer
+                  uptime:
+                    type: number
+
+  /api/agents:
+    get:
+      tags:
+        - Agents
+      summary: List all agents
+      description: Get a list of all registered agents with optional filtering
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [online, offline, busy, away]
+          description: Filter by agent status
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Filter by agent type
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+          description: Maximum number of agents to return
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: Number of agents to skip
+      responses:
+        '200':
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Agent'
+
+    post:
+      tags:
+        - Agents
+      summary: Register new agent
+      description: Register a new agent in the system
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agentId
+              properties:
+                agentId:
+                  type: string
+                  description: Unique agent identifier
+                  example: "worker-alpha"
+                name:
+                  type: string
+                  description: Human-readable agent name
+                  example: "Alpha Worker"
+                type:
+                  type: string
+                  description: Agent type/category
+                  example: "worker"
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                  description: List of agent capabilities
+                  example: ["code", "analysis", "research"]
+                metadata:
+                  type: object
+                  description: Additional agent metadata
+      responses:
+        '201':
+          description: Agent created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  agent:
+                    $ref: '#/components/schemas/Agent'
+        '409':
+          description: Agent already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/agents/{agentId}:
+    get:
+      tags:
+        - Agents
+      summary: Get agent details
+      description: Get detailed information about a specific agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent:
+                    $ref: '#/components/schemas/Agent'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      tags:
+        - Agents
+      summary: Update agent
+      description: Update agent information
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                status:
+                  type: string
+                  enum: [online, offline, busy, away]
+                metadata:
+                  type: object
+      responses:
+        '200':
+          description: Agent updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  agent:
+                    $ref: '#/components/schemas/Agent'
+        '404':
+          description: Agent not found
+
+    delete:
+      tags:
+        - Agents
+      summary: Delete agent
+      description: Delete an agent from the system
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/agents/{agentId}/stats:
+    get:
+      tags:
+        - Agents
+      summary: Get agent statistics
+      description: Get statistics for an agent including memory, jobs, etc.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agentId:
+                    type: string
+                  memory:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      byType:
+                        type: object
+                  jobs:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      pending:
+                        type: integer
+                      inProgress:
+                        type: integer
+                      completed:
+                        type: integer
+
+  /api/agents/{agentId}/memory:
+    get:
+      tags:
+        - Agents
+      summary: Get agent memories
+      description: Get logged memories (thoughts, observations, etc.) for an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: types
+          in: query
+          schema:
+            type: string
+          description: Comma-separated list of memory types (thought,need,observation,decision,job)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: minImportance
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: Minimum importance level (1-5)
+      responses:
+        '200':
+          description: Agent memories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  memories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Memory'
+
+    post:
+      tags:
+        - Agents
+      summary: Log memory
+      description: Log a thought, need, observation, or decision for an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - memoryType
+                - content
+              properties:
+                memoryType:
+                  type: string
+                  enum: [thought, need, observation, decision, job]
+                  description: Type of memory being logged
+                content:
+                  type: string
+                  description: Memory content
+                context:
+                  type: object
+                  description: Additional context (JSON)
+                importance:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                  description: Importance level (1=low, 5=critical)
+      responses:
+        '201':
+          description: Memory logged successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  memory:
+                    $ref: '#/components/schemas/Memory'
+
+  /api/agents/{agentId}/needs:
+    get:
+      tags:
+        - Agents
+      summary: Get agent needs
+      description: Get all unmet needs for an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent needs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  needs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Memory'
+
+  /api/agents/{agentId}/jobs:
+    get:
+      tags:
+        - Agents
+      summary: Get agent jobs
+      description: Get jobs assigned to an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, in_progress, completed, cancelled]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Agent jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+
+    post:
+      tags:
+        - Agents
+      summary: Create job
+      description: Create a new job for an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+              properties:
+                title:
+                  type: string
+                  description: Job title
+                description:
+                  type: string
+                  description: Job description
+                priority:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                  default: 2
+                  description: Job priority (1=low, 5=critical)
+                assignedBy:
+                  type: string
+                  description: Agent ID who assigned the job
+      responses:
+        '201':
+          description: Job created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  job:
+                    $ref: '#/components/schemas/Job'
+
+  /api/agents/{agentId}/jobs/{jobId}:
+    put:
+      tags:
+        - Agents
+      summary: Update job status
+      description: Update the status of a job
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [pending, in_progress, completed, cancelled]
+                result:
+                  type: object
+                  description: Job result data
+      responses:
+        '200':
+          description: Job updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  job:
+                    $ref: '#/components/schemas/Job'
+
+  /api/messages/conversation/{agent1}/{agent2}:
+    get:
+      tags:
+        - Messages
+      summary: Get conversation
+      description: Get message history between two agents
+      parameters:
+        - name: agent1
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: agent2
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Conversation messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+
+  /api/messages/agent/{agentId}:
+    get:
+      tags:
+        - Messages
+      summary: Get agent messages
+      description: Get all messages for a specific agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Agent messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+
+    post:
+      tags:
+        - Messages
+      summary: Send message (REST)
+      description: Send a message via REST API (fallback when WebSocket unavailable)
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fromAgent
+                - toAgent
+                - content
+              properties:
+                fromAgent:
+                  type: string
+                  description: Sender agent ID
+                toAgent:
+                  type: string
+                  description: Recipient agent ID
+                content:
+                  type: string
+                  description: Message content
+                type:
+                  type: string
+                  enum: [text, command, status, memory, error, system]
+                  default: text
+                metadata:
+                  type: object
+      responses:
+        '201':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/Message'
+
+  /api/messages/agent/{agentId}/unread:
+    get:
+      tags:
+        - Messages
+      summary: Get unread count
+      description: Get the number of unread messages for an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Unread message count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agentId:
+                    type: string
+                  unreadCount:
+                    type: integer
+
+  /api/messages/{messageId}/read:
+    put:
+      tags:
+        - Messages
+      summary: Mark message as read
+      description: Mark a specific message as read
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Message marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/Message'
+
+  /api/broadcast:
+    post:
+      tags:
+        - Messages
+      summary: Broadcast message
+      description: Broadcast a message to all connected agents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                fromAgent:
+                  type: string
+                  description: Sender agent ID (optional, defaults to system)
+                content:
+                  type: string
+                type:
+                  type: string
+                  default: system
+                metadata:
+                  type: object
+      responses:
+        '200':
+          description: Message broadcasted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  recipients:
+                    type: integer
+                    description: Number of agents that received the message
+
+components:
+  schemas:
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        agentId:
+          type: string
+          description: Unique agent identifier
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+          enum: [online, offline, busy, away]
+        capabilities:
+          type: array
+          items:
+            type: string
+        socketId:
+          type: string
+          nullable: true
+        lastHeartbeat:
+          type: string
+          format: date-time
+        lastActive:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        messageId:
+          type: string
+        fromAgent:
+          type: string
+        toAgent:
+          type: string
+        content:
+          type: string
+        type:
+          type: string
+          enum: [text, command, status, memory, error, system]
+        metadata:
+          type: object
+        delivered:
+          type: boolean
+        read:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    Memory:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        agentId:
+          type: string
+        memoryType:
+          type: string
+          enum: [thought, need, observation, decision, job]
+        content:
+          type: string
+        context:
+          type: object
+        importance:
+          type: integer
+          minimum: 1
+          maximum: 5
+        relatedMessageId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        jobId:
+          type: string
+        agentId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: integer
+        status:
+          type: string
+          enum: [pending, in_progress, completed, cancelled]
+        assignedBy:
+          type: string
+        result:
+          type: object
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string

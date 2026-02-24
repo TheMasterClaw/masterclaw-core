@@ -1,0 +1,85 @@
+import React, { useState } from 'react';
+import { AgentList } from './components/AgentList';
+import { ChatWindow } from './components/ChatWindow';
+import { useWebSocket } from './hooks/useWebSocket';
+import { MessageSquare, Activity } from 'lucide-react';
+
+// Default to Rex's identity
+const CURRENT_AGENT = {
+  id: 'rex-deus',
+  name: 'Rex Deus',
+  role: 'Commander'
+};
+
+function App() {
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  
+  const {
+    connected,
+    messages,
+    agents,
+    typing,
+    error,
+    sendMessage,
+    sendTyping
+  } = useWebSocket(
+    CURRENT_AGENT.id,
+    CURRENT_AGENT.name,
+    CURRENT_AGENT.role
+  );
+  
+  return (
+    <div className="h-screen bg-gray-950 flex flex-col">
+      {/* Top Bar */}
+      <header className="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center">
+            <MessageSquare className="w-4 h-4 text-white" />
+          </div>
+          <h1 className="text-white font-bold text-lg">MasterClaw Interface</h1>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          {error && (
+            <span className="text-red-400 text-sm">{error}</span>
+          )}
+          
+          <div className="flex items-center gap-2">
+            <Activity className={`w-4 h-4 ${connected ? 'text-green-400' : 'text-red-400'}`} />
+            <span className={`text-sm ${connected ? 'text-green-400' : 'text-red-400'}`}>
+              {connected ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-2 text-gray-300">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white text-sm font-semibold">
+              {CURRENT_AGENT.name[0]}
+            </div>
+            <span className="text-sm hidden sm:block">{CURRENT_AGENT.name}</span>
+          </div>
+        </div>
+      </header>
+      
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        <AgentList
+          agents={agents}
+          selectedAgent={selectedAgent}
+          onSelectAgent={setSelectedAgent}
+          currentAgentId={CURRENT_AGENT.id}
+        />
+        
+        <ChatWindow
+          selectedAgent={selectedAgent}
+          messages={messages}
+          currentAgentId={CURRENT_AGENT.id}
+          onSendMessage={sendMessage}
+          onTyping={sendTyping}
+          isTyping={selectedAgent && typing[selectedAgent.id]}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default App;

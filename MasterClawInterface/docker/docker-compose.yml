@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: masterclaw-db
+    environment:
+      POSTGRES_USER: masterclaw
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-masterclaw_secret}
+      POSTGRES_DB: masterclaw_chat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U masterclaw -d masterclaw_chat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - masterclaw-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: masterclaw-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_secret}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - masterclaw-network
+
+  # MasterClaw Backend
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: masterclaw-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgres://masterclaw:${DB_PASSWORD:-masterclaw_secret}@postgres:5432/masterclaw_chat
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secret}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change_this_in_production}
+      JWT_EXPIRES_IN: 24h
+      WS_HEARTBEAT_INTERVAL: 30000
+      AGENT_TIMEOUT: 60000
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_logs:/app/logs
+    networks:
+      - masterclaw-network
+    restart: unless-stopped
+
+  # MasterClaw Frontend (Nginx)
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: masterclaw-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - masterclaw-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_logs:
+
+networks:
+  masterclaw-network:
+    driver: bridge
