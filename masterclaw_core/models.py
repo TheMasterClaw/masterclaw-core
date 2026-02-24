@@ -798,3 +798,165 @@ class AutoSummarizeConfig(BaseModel):
     auto_archive: bool = Field(False, description="Whether to auto-archive after summarizing")
     preserve_insights: bool = Field(True, description="Whether to extract and preserve insights")
 
+
+# =============================================================================
+# Agent Chat Models
+# =============================================================================
+
+class AgentStatus(str, Enum):
+    """Agent connection and operational status"""
+    ONLINE = "online"
+    BUSY = "busy"
+    AWAY = "away"
+    OFFLINE = "offline"
+    ERROR = "error"
+
+
+class AgentMessageType(str, Enum):
+    """Types of messages in the agent chat system"""
+    USER_MESSAGE = "user_message"
+    AGENT_MESSAGE = "agent_message"
+    STATUS_UPDATE = "status_update"
+    TYPING_INDICATOR = "typing_indicator"
+    READ_RECEIPT = "read_receipt"
+    AGENT_THOUGHT = "agent_thought"
+    AGENT_JOB_STARTED = "agent_job_started"
+    AGENT_JOB_COMPLETED = "agent_job_completed"
+    AGENT_DESIRE = "agent_desire"
+    AGENT_BLOCKER = "agent_blocker"
+    SYSTEM_NOTICE = "system_notice"
+    ERROR_MESSAGE = "error_message"
+    SWARM_FORMED = "swarm_formed"
+    SWARM_DISBANDED = "swarm_disbanded"
+    AGENT_HANDOFF = "agent_handoff"
+
+
+class AgentJobStatus(str, Enum):
+    """Status of an agent's job"""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class AgentInfoResponse(BaseModel):
+    """Response model for agent information"""
+    agent_id: str = Field(..., description="Unique agent identifier")
+    name: str = Field(..., description="Display name")
+    role: str = Field(..., description="Agent role")
+    status: AgentStatus = Field(..., description="Current status")
+    capabilities: List[str] = Field(default_factory=list, description="Agent capabilities")
+    connected_at: datetime = Field(..., description="When agent connected")
+    last_activity: datetime = Field(..., description="Last activity timestamp")
+    current_job: Optional[str] = Field(None, description="Current job ID if any")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+
+class AgentThoughtEntry(BaseModel):
+    """Agent thought/memory entry"""
+    thought_id: str = Field(..., description="Unique thought ID")
+    agent_id: str = Field(..., description="Agent ID")
+    thought: str = Field(..., description="The thought content")
+    context: Optional[str] = Field(None, description="Context for the thought")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    related_job_id: Optional[str] = Field(None, description="Related job if any")
+
+
+class AgentJobEntry(BaseModel):
+    """Agent job entry"""
+    job_id: str = Field(..., description="Unique job ID")
+    agent_id: str = Field(..., description="Agent ID")
+    title: str = Field(..., description="Job title")
+    description: str = Field(..., description="Job description")
+    status: AgentJobStatus = Field(..., description="Current status")
+    started_at: datetime = Field(..., description="When job started")
+    completed_at: Optional[datetime] = Field(None, description="When job completed")
+    result: Optional[str] = Field(None, description="Job result/summary")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentDesireEntry(BaseModel):
+    """Agent desire/need entry"""
+    desire_id: str = Field(..., description="Unique desire ID")
+    agent_id: str = Field(..., description="Agent ID")
+    description: str = Field(..., description="What the agent needs")
+    priority: str = Field("medium", description="Priority level")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    fulfilled_at: Optional[datetime] = Field(None, description="When fulfilled")
+    fulfilled_by: Optional[str] = Field(None, description="Who fulfilled it")
+
+
+class AgentBlockerEntry(BaseModel):
+    """Agent blocker entry"""
+    blocker_id: str = Field(..., description="Unique blocker ID")
+    agent_id: str = Field(..., description="Agent ID")
+    description: str = Field(..., description="What's blocking the agent")
+    severity: str = Field("high", description="Severity level")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    resolved_at: Optional[datetime] = Field(None, description="When resolved")
+    resolved_by: Optional[str] = Field(None, description="Who resolved it")
+    resolution: Optional[str] = Field(None, description="How it was resolved")
+
+
+class AgentChatMessage(BaseModel):
+    """A chat message in the agent system"""
+    message_id: str = Field(..., description="Unique message ID")
+    message_type: AgentMessageType = Field(..., description="Type of message")
+    sender_id: str = Field(..., description="Sender ID (user or agent)")
+    sender_name: str = Field(..., description="Sender display name")
+    recipient_id: Optional[str] = Field(None, description="Target agent ID (None = broadcast)")
+    content: str = Field(..., description="Message content")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    conversation_id: str = Field("default", description="Conversation thread ID")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentMemoryResponse(BaseModel):
+    """Full memory for an agent"""
+    agent_id: str = Field(..., description="Agent ID")
+    thoughts: List[AgentThoughtEntry] = Field(default_factory=list)
+    jobs: List[AgentJobEntry] = Field(default_factory=list)
+    desires: List[AgentDesireEntry] = Field(default_factory=list)
+    blockers: List[AgentBlockerEntry] = Field(default_factory=list)
+
+
+class SwarmInfoResponse(BaseModel):
+    """Information about an agent swarm"""
+    swarm_id: str = Field(..., description="Unique swarm ID")
+    name: str = Field(..., description="Swarm name")
+    leader_id: str = Field(..., description="Leader agent ID")
+    member_ids: List[str] = Field(default_factory=list, description="Member agent IDs")
+    formed_at: datetime = Field(..., description="When swarm was formed")
+    status: str = Field(..., description="Swarm status")
+    goal: Optional[str] = Field(None, description="Swarm objective")
+
+
+class SendAgentMessageRequest(BaseModel):
+    """Request to send a message to agent(s)"""
+    content: str = Field(..., description="Message content", min_length=1)
+    recipient_id: Optional[str] = Field(None, description="Target agent (None = all)")
+    conversation_id: Optional[str] = Field(None, description="Conversation thread")
+    message_type: AgentMessageType = Field(AgentMessageType.USER_MESSAGE)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FormSwarmRequest(BaseModel):
+    """Request to form a new agent swarm"""
+    name: str = Field(..., description="Swarm name", min_length=1, max_length=100)
+    leader_id: str = Field(..., description="Leader agent ID")
+    member_ids: List[str] = Field(..., description="Member agent IDs", min_length=1)
+    goal: Optional[str] = Field(None, description="Swarm objective")
+
+
+class ResolveBlockerRequest(BaseModel):
+    """Request to resolve an agent blocker"""
+    blocker_id: str = Field(..., description="Blocker ID to resolve")
+    resolution: str = Field(..., description="How the blocker was resolved")
+
+
+class FulfillDesireRequest(BaseModel):
+    """Request to fulfill an agent desire"""
+    desire_id: str = Field(..., description="Desire ID to fulfill")
+
+

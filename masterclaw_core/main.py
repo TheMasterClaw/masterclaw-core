@@ -85,6 +85,21 @@ from .models import (
     ArchiveListResponse,
     SessionSummarizeRequest,
     AutoSummarizeConfig,
+    AgentStatus,
+    AgentMessageType,
+    AgentJobStatus,
+    AgentInfoResponse,
+    AgentThoughtEntry,
+    AgentJobEntry,
+    AgentDesireEntry,
+    AgentBlockerEntry,
+    AgentChatMessage,
+    AgentMemoryResponse,
+    SwarmInfoResponse,
+    SendAgentMessageRequest,
+    FormSwarmRequest,
+    ResolveBlockerRequest,
+    FulfillDesireRequest,
 )
 
 from .analytics import analytics
@@ -93,6 +108,7 @@ from .memory import get_memory_store, MemoryStore
 from .websocket import manager
 from .tools import registry as tool_registry
 from .summarizer import summarizer, ConversationMessage, SummaryType
+from .agent_chat import agent_chat, AgentStatus, MessageType, JobStatus
 from .middleware import (
     RequestLoggingMiddleware,
     RateLimitMiddleware,
