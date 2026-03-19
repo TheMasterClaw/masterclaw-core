@@ -32,3 +32,4 @@ htmlcov/
 
 # ChromaDB
 .chroma/
+.gitnexus
